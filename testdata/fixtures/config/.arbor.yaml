@@ -1,0 +1,23 @@
+defaults:
+  base_ref: main
+  env_action: symlink
+  command_scope: per_worktree
+  trusted_auto_run: true
+  worktree_template: ../{{ .Repo }}-{{ .Name }}
+env_files:
+  - id: env
+    label: Shared env
+    source_path: .env.shared
+    target_path: .env
+commands:
+  - id: bootstrap
+    label: Bootstrap
+    command: echo bootstrap
+    scope: per_worktree
+    trusted: true
+presets:
+  fast:
+    description: Fast local setup
+    env_selection: [env]
+    commands: [bootstrap]
+    auto_run: true

@@ -1,0 +1,181 @@
+name: release-homebrew
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: linux
+            goarch: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build release archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION_STRIPPED="${VERSION#v}"
+          DIST_DIR="dist"
+          ARCHIVE_BASENAME="arbor_${VERSION_STRIPPED}_${GOOS}_${GOARCH}"
+          mkdir -p "${DIST_DIR}/${ARCHIVE_BASENAME}"
+          CGO_ENABLED=0 go build \
+            -trimpath \
+            -ldflags="-s -w -X arbor/internal/version.Number=${VERSION} -X arbor/internal/version.Commit=${GITHUB_SHA} -X arbor/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "${DIST_DIR}/${ARCHIVE_BASENAME}/arbor" \
+            ./cmd/arbor
+          cp LICENSE README.md "${DIST_DIR}/${ARCHIVE_BASENAME}/"
+          tar -C "${DIST_DIR}/${ARCHIVE_BASENAME}" -czf "${DIST_DIR}/${ARCHIVE_BASENAME}.tar.gz" .
+          shasum -a 256 "${DIST_DIR}/${ARCHIVE_BASENAME}.tar.gz" > "${DIST_DIR}/${ARCHIVE_BASENAME}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+
+  homebrew:
+    runs-on: ubuntu-latest
+    needs: release
+
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Checksum release archives
+        id: checksums
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION_STRIPPED="${VERSION#v}"
+          echo "darwin_arm64=$(shasum -a 256 dist/arbor_${VERSION_STRIPPED}_darwin_arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "darwin_amd64=$(shasum -a 256 dist/arbor_${VERSION_STRIPPED}_darwin_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "linux_amd64=$(shasum -a 256 dist/arbor_${VERSION_STRIPPED}_linux_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: gcstools/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Generate formula
+        env:
+          VERSION: ${{ github.ref_name }}
+          SHA_DARWIN_ARM64: ${{ steps.checksums.outputs.darwin_arm64 }}
+          SHA_DARWIN_AMD64: ${{ steps.checksums.outputs.darwin_amd64 }}
+          SHA_LINUX_AMD64: ${{ steps.checksums.outputs.linux_amd64 }}
+        run: |
+          set -euo pipefail
+          VERSION_STRIPPED="${VERSION#v}"
+          mkdir -p homebrew-tap/Formula
+          cat <<EOF > homebrew-tap/Formula/arbor.rb
+          class Arbor < Formula
+            desc "Manage Git worktree setup workflows"
+            homepage "https://github.com/gcstools/arbor"
+            version "${VERSION_STRIPPED}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/gcstools/arbor/releases/download/${VERSION}/arbor_${VERSION_STRIPPED}_darwin_arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              else
+                url "https://github.com/gcstools/arbor/releases/download/${VERSION}/arbor_${VERSION_STRIPPED}_darwin_amd64.tar.gz"
+                sha256 "${SHA_DARWIN_AMD64}"
+              end
+            end
+
+            on_linux do
+              url "https://github.com/gcstools/arbor/releases/download/${VERSION}/arbor_${VERSION_STRIPPED}_linux_amd64.tar.gz"
+              sha256 "${SHA_LINUX_AMD64}"
+            end
+
+            def install
+              bin.install "arbor"
+              bash_completion.install "completions/arbor.bash" => "arbor" if Dir.exist?("completions")
+              zsh_completion.install "completions/_arbor" if Dir.exist?("completions")
+              fish_completion.install "completions/arbor.fish" if Dir.exist?("completions")
+            end
+
+            test do
+              assert_match "Manage Git worktree setup workflows.", shell_output("#{bin}/arbor --help")
+            end
+          end
+          EOF
+
+      - name: Commit and push formula update
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/arbor.rb
+          git commit -m "arbor ${VERSION}" || exit 0
+          git push
