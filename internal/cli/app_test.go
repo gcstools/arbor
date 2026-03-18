@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -337,7 +336,7 @@ func TestPullCommandFromLinkedWorktree(t *testing.T) {
 	if gotCWD != cwd {
 		t.Fatalf("got cwd %q want %q", gotCWD, cwd)
 	}
-	if !strings.Contains(normalizeForAssertion(out.String()), "pulled main worktree: "+normalizedPath(t, mainRoot)) {
+	if got := pullPathFromOutput(t, out.String(), "pulled main worktree: "); got != normalizedPath(t, mainRoot) {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 	if got := readFile(t, filepath.Join(mainRoot, "README.md")); !strings.Contains(got, "remote update") {
@@ -373,7 +372,7 @@ func TestPullCommandSkipsDirtyMainWorktree(t *testing.T) {
 	if gotCWD != cwd {
 		t.Fatalf("got cwd %q want %q", gotCWD, cwd)
 	}
-	if !strings.Contains(normalizeForAssertion(out.String()), "skipped pull: main worktree has local changes at "+normalizedPath(t, mainRoot)) {
+	if got := pullPathFromOutput(t, out.String(), "skipped pull: main worktree has local changes at "); got != normalizedPath(t, mainRoot) {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 }
@@ -390,7 +389,7 @@ func TestPullCommandFromMainWorktree(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(normalizeForAssertion(out.String()), "pulled main worktree: "+normalizedPath(t, mainRoot)) {
+	if got := pullPathFromOutput(t, out.String(), "pulled main worktree: "); got != normalizedPath(t, mainRoot) {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 	if got := readFile(t, filepath.Join(mainRoot, "README.md")); !strings.Contains(got, "remote update") {
@@ -457,19 +456,21 @@ func readFile(t *testing.T, path string) string {
 
 func normalizedPath(t *testing.T, path string) string {
 	t.Helper()
-	cleaned := filepath.Clean(path)
-	if runtime.GOOS == "windows" {
-		return filepath.ToSlash(cleaned)
-	}
 	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return cleaned
+	if err == nil {
+		return filepath.ToSlash(filepath.Clean(resolved))
 	}
-	return filepath.Clean(resolved)
+	return filepath.ToSlash(filepath.Clean(path))
 }
 
-func normalizeForAssertion(value string) string {
-	return filepath.ToSlash(value)
+func pullPathFromOutput(t *testing.T, output, prefix string) string {
+	t.Helper()
+	normalized := filepath.ToSlash(strings.TrimSpace(output))
+	idx := strings.Index(normalized, prefix)
+	if idx == -1 {
+		t.Fatalf("output missing prefix %q: %s", prefix, output)
+	}
+	return normalizedPath(t, normalized[idx+len(prefix):])
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
