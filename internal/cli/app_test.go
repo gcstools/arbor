@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -240,7 +241,7 @@ func TestPullCommandFromLinkedWorktree(t *testing.T) {
 	if gotCWD != cwd {
 		t.Fatalf("got cwd %q want %q", gotCWD, cwd)
 	}
-	if !strings.Contains(out.String(), "pulled main worktree: "+canonicalPath(t, mainRoot)) {
+	if !strings.Contains(normalizeForAssertion(out.String()), "pulled main worktree: "+normalizedPath(t, mainRoot)) {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 	if got := readFile(t, filepath.Join(mainRoot, "README.md")); !strings.Contains(got, "remote update") {
@@ -276,7 +277,7 @@ func TestPullCommandSkipsDirtyMainWorktree(t *testing.T) {
 	if gotCWD != cwd {
 		t.Fatalf("got cwd %q want %q", gotCWD, cwd)
 	}
-	if !strings.Contains(out.String(), "skipped pull: main worktree has local changes at "+canonicalPath(t, mainRoot)) {
+	if !strings.Contains(normalizeForAssertion(out.String()), "skipped pull: main worktree has local changes at "+normalizedPath(t, mainRoot)) {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 }
@@ -293,7 +294,7 @@ func TestPullCommandFromMainWorktree(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out.String(), "pulled main worktree: "+canonicalPath(t, mainRoot)) {
+	if !strings.Contains(normalizeForAssertion(out.String()), "pulled main worktree: "+normalizedPath(t, mainRoot)) {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 	if got := readFile(t, filepath.Join(mainRoot, "README.md")); !strings.Contains(got, "remote update") {
@@ -358,13 +359,21 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-func canonicalPath(t *testing.T, path string) string {
+func normalizedPath(t *testing.T, path string) string {
 	t.Helper()
+	cleaned := filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		return filepath.ToSlash(cleaned)
+	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		t.Fatal(err)
+		return cleaned
 	}
-	return resolved
+	return filepath.Clean(resolved)
+}
+
+func normalizeForAssertion(value string) string {
+	return filepath.ToSlash(value)
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

@@ -134,4 +134,5 @@ go run ./cmd/arbor create feature-auth --preset fast --plan
 ## More Docs
 - Full reference: [DOCS.md](DOCS.md)
 - Deploy for dev testing: [docs/deploy.md](docs/deploy.md)
+- Deploy to Homebrew: [docs/deploy-brew.md](docs/deploy-brew.md)
 - Release checklist: [docs/release.md](docs/release.md)

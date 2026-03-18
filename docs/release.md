@@ -26,4 +26,5 @@
 ## Docs
 1. Review `README.md`.
 2. Review [deploy.md](/Users/simon/work/github/arbor/docs/deploy.md).
-3. Update examples if command output changed.
+3. Review [deploy-brew.md](/Users/simon/work/github/arbor/docs/deploy-brew.md).
+4. Update examples if command output changed.

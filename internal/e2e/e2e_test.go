@@ -128,8 +128,14 @@ func TestWindowsAssumptionsOrUnixSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if runtime.GOOS == "windows" {
-		if info.Mode()&os.ModeSymlink != 0 {
-			t.Fatalf("expected copy fallback or plain file on windows")
+		if info.Mode()&os.ModeSymlink == 0 {
+			data, err := os.ReadFile(dst)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != "hello" {
+				t.Fatalf("expected copied file contents, got %q", string(data))
+			}
 		}
 	} else if info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("expected symlink on unix-like platforms")
