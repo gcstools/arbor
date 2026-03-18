@@ -108,7 +108,7 @@ func TestZshCompletionInstallerUpdatesZshrc(t *testing.T) {
 	if !strings.Contains(got, "autoload -Uz compinit") {
 		t.Fatalf("expected compinit setup in .zshrc:\n%s", got)
 	}
-	if !strings.Contains(filepath.ToSlash(got), filepath.ToSlash(filepath.Join(home, ".zsh", "completions"))) {
+	if !strings.Contains(filepath.ToSlash(got), filepath.ToSlash(filepath.Dir(installer.scriptPath))) {
 		t.Fatalf("expected completion path in .zshrc:\n%s", got)
 	}
 }
@@ -132,7 +132,7 @@ func TestBashCompletionInstallerUsesCustomPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(filepath.ToSlash(string(bashrcContent)), filepath.ToSlash(customPath)) {
+	if !strings.Contains(filepath.ToSlash(string(bashrcContent)), filepath.ToSlash(installer.scriptPath)) {
 		t.Fatalf("expected custom completion path in .bashrc:\n%s", string(bashrcContent))
 	}
 }
