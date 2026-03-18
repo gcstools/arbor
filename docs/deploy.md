@@ -66,7 +66,7 @@ GOOS=windows GOARCH=amd64 go build -o ./bin/arbor-windows-amd64.exe ./cmd/arbor
 ## Notes
 - The binary is self-contained; there is no separate runtime install step.
 - Current config default path is `.arbor.yaml` in the repo root.
-- Shell completion generation is available through Cobra:
+- Shell completion install is available through the CLI when stdout is an interactive terminal:
 - Homebrew releases are published from tags through `.github/workflows/release-homebrew.yml`.
 
 ```bash
@@ -74,4 +74,10 @@ GOOS=windows GOARCH=amd64 go build -o ./bin/arbor-windows-amd64.exe ./cmd/arbor
 ./bin/arbor completion bash
 ./bin/arbor completion fish
 ./bin/arbor completion powershell
+```
+
+For redirects or custom shell setup, print the raw script instead:
+
+```bash
+./bin/arbor completion zsh --stdout
 ```

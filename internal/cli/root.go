@@ -50,8 +50,8 @@ func NewRootCommand(streams IOStreams) *cobra.Command {
 		newPullCommand(opts),
 		newConfigCommand(opts),
 		newVersionCommand(),
+		newCompletionCommand(),
 	)
-	rootCmd.InitDefaultCompletionCmd()
 
 	return rootCmd
 }

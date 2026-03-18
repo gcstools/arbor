@@ -42,6 +42,102 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestCompletionCommandStdout(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	if err := Execute([]string{"completion", "zsh", "--stdout"}, IOStreams{
+		In:     bytes.NewBuffer(nil),
+		Out:    &out,
+		ErrOut: &errOut,
+	}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "#compdef arbor") {
+		t.Fatalf("unexpected completion output: %s", out.String())
+	}
+}
+
+func TestZshCompletionInstallerUpdatesZshrc(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root := NewRootCommand(IOStreams{In: bytes.NewBuffer(nil), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}})
+	installer, err := buildCompletionInstaller(root, completionShellZsh, "", false)
+	if err != nil {
+		t.Fatalf("buildCompletionInstaller returned error: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(installer.scriptPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scriptFile, err := os.OpenFile(installer.scriptPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.scriptGenerator(scriptFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := scriptFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := installer.postInstall(home, installer.scriptPath); err != nil {
+		t.Fatalf("postInstall returned error: %v", err)
+	}
+	if _, err := installer.postInstall(home, installer.scriptPath); err != nil {
+		t.Fatalf("second postInstall returned error: %v", err)
+	}
+
+	scriptContent, err := os.ReadFile(installer.scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(scriptContent), "#compdef arbor") {
+		t.Fatalf("unexpected zsh completion script: %s", string(scriptContent))
+	}
+
+	zshrcContent, err := os.ReadFile(filepath.Join(home, ".zshrc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(zshrcContent)
+	if strings.Count(got, "# arbor completion") != 1 {
+		t.Fatalf("expected exactly one Arbor block in .zshrc:\n%s", got)
+	}
+	if !strings.Contains(got, "autoload -Uz compinit") {
+		t.Fatalf("expected compinit setup in .zshrc:\n%s", got)
+	}
+	if !strings.Contains(got, filepath.Join(home, ".zsh", "completions")) {
+		t.Fatalf("expected completion path in .zshrc:\n%s", got)
+	}
+}
+
+func TestBashCompletionInstallerUsesCustomPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	customPath := filepath.Join(home, "completions", "arbor.bash")
+	root := NewRootCommand(IOStreams{In: bytes.NewBuffer(nil), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}})
+	installer, err := buildCompletionInstaller(root, completionShellBash, customPath, false)
+	if err != nil {
+		t.Fatalf("buildCompletionInstaller returned error: %v", err)
+	}
+
+	if _, err := installer.postInstall(home, installer.scriptPath); err != nil {
+		t.Fatalf("postInstall returned error: %v", err)
+	}
+
+	bashrcContent, err := os.ReadFile(filepath.Join(home, ".bashrc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(bashrcContent), customPath) {
+		t.Fatalf("expected custom completion path in .bashrc:\n%s", string(bashrcContent))
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer

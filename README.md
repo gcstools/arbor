@@ -31,6 +31,18 @@ If you want the released binary through Homebrew:
 brew install gcstools/tap/arbor
 ```
 
+Install shell completions into your current shell setup:
+
+```bash
+arbor completion zsh
+```
+
+Print the raw completion script instead of installing it:
+
+```bash
+arbor completion zsh --stdout
+```
+
 ## Quick Start
 Initialize a starter config and validate it:
 
