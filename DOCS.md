@@ -1,64 +1,239 @@
-# Arbor
+# Arbor Docs
 
 Arbor is a Go CLI for creating a Git worktree and bootstrapping it with env files and setup commands.
 
+Use [README.md](/Users/simon/work/github/arbor/README.md) as the end-user guide. This document keeps the full reference plus source/developer-oriented instructions.
+
+## Install From Homebrew
+
+For normal usage, install Arbor with Homebrew:
+
+```bash
+brew install gcstools/tap/arbor
+```
+
+Then inspect the CLI:
+
+```bash
+arbor --help
+arbor create --help
+```
+
+## Build and Run From Source
+
+This project is a Go CLI. If you are working in this repository, use the commands below.
+
+Install dependencies:
+
+```bash
+go mod tidy
+```
+
+Run directly from the repo:
+
+```bash
+go run ./cmd/arbor --help
+go run ./cmd/arbor config --help
+```
+
+Build a local binary:
+
+```bash
+mkdir -p bin
+go build -o ./bin/arbor ./cmd/arbor
+```
+
+Run the built binary:
+
+```bash
+./bin/arbor --help
+./bin/arbor version
+./bin/arbor completion bash
+```
+
+Run tests:
+
+```bash
+go test ./...
+```
+
+If your environment blocks the default Go build cache, use:
+
+```bash
+GOCACHE=/tmp/arbor-go-build-cache go test ./...
+```
+
+Cross-compile for manual testing:
+
+```bash
+mkdir -p bin
+GOOS=darwin GOARCH=arm64 go build -o ./bin/arbor-darwin-arm64 ./cmd/arbor
+GOOS=linux GOARCH=amd64 go build -o ./bin/arbor-linux-amd64 ./cmd/arbor
+GOOS=windows GOARCH=amd64 go build -o ./bin/arbor-windows-amd64.exe ./cmd/arbor
+```
+
 ## Features
+
 - Detect env files from common project patterns and repo config.
 - Detect setup commands from `package.json`, `Makefile`, `justfile`, and Arbor config.
 - Create one worktree with one branch per invocation.
 - Create a worktree from an existing local branch.
 - Apply env-file actions with `symlink`, `copy`, or `skip`.
 - Run trusted preset commands automatically or prompt for command approval.
+- Install or print shell completion scripts.
 
-## Quick Start
-Install dependencies and inspect the CLI:
+## Commands
 
-```bash
-go mod tidy
-go run ./cmd/arbor --help
-```
+### `arbor init`
 
-Create a starter config:
+Write a starter `.arbor.yaml` in the current repo.
 
 ```bash
-go run ./cmd/arbor init
-go run ./cmd/arbor config validate
+arbor init
+arbor init --force
 ```
+
+`--force` overwrites an existing config file.
+
+### `arbor config`
+
+Print the resolved config file:
+
+```bash
+arbor config
+```
+
+Validate the current config:
+
+```bash
+arbor config validate
+```
+
+Validate a specific config file:
+
+```bash
+arbor --config .arbor.yaml config validate
+```
+
+### `arbor detect`
+
+Preview detected env files and setup commands without changing Git state:
+
+```bash
+arbor detect
+```
+
+The output includes:
+
+- repo root
+- detected env files and their target paths
+- detected setup commands and their source
+- warnings when Arbor finds ambiguous or incomplete data
+
+### `arbor create`
 
 Preview a worktree plan:
 
 ```bash
-go run ./cmd/arbor create feature-auth --plan
+arbor create feature-auth --plan
 ```
-
-Interactive `create` prompts for a branch prefix before resolving the branch name and worktree path.
 
 Create and execute the worktree setup:
 
 ```bash
-go run ./cmd/arbor create feature-auth --non-interactive
+arbor create feature-auth --non-interactive
 ```
 
-Create a worktree from an existing local branch:
+Create from an existing local branch:
 
 ```bash
-go run ./cmd/arbor create --branch feature-auth --non-interactive
+arbor create review-auth --branch feature-auth --non-interactive
 ```
 
-Create, run setup, and open the resulting worktree in a specific app:
+Create with a preset:
 
 ```bash
-go run ./cmd/arbor create feature-auth --non-interactive --open-app cursor
+arbor create feature-auth --preset fast
 ```
 
-## Core Commands
-- `arbor detect`: preview env files and commands without changing Git state.
-- `arbor create`: plan or execute worktree creation and setup.
-- `arbor init`: write a starter `.arbor.yaml`.
-- `arbor config`: print the effective config.
-- `arbor config validate`: validate the current config file.
+Create from a specific base branch or commit:
+
+```bash
+arbor create feature-auth --base main --plan
+```
+
+Override branch naming and path templates:
+
+```bash
+arbor create feature-auth \
+  --branch-template 'feature/{{ .Name }}' \
+  --path-template '../{{ .Repo }}-{{ .Name }}' \
+  --plan
+```
+
+Open the created worktree in a specific app:
+
+```bash
+arbor create feature-auth --non-interactive --open-app cursor
+```
+
+Notes:
+
+- Interactive mode prompts for unresolved choices before creating the worktree.
+- Non-interactive mode requires enough config and flags to resolve the run without prompts.
+- `--branch` reuses an existing local branch and cannot be combined with `--base` or `--branch-template`.
+
+### `arbor pull`
+
+Pull the main worktree when it has no local changes:
+
+```bash
+arbor pull
+```
+
+If the main worktree is dirty, Arbor skips the pull and prints the main worktree path.
+
+### `arbor completion`
+
+Install shell completions:
+
+```bash
+arbor completion zsh
+arbor completion bash
+arbor completion fish
+arbor completion powershell
+```
+
+Print the raw completion script:
+
+```bash
+arbor completion zsh --stdout
+```
+
+Write the script to a custom location:
+
+```bash
+arbor completion fish --path ~/.config/fish/completions/arbor.fish
+```
+
+Disable descriptions in completion entries:
+
+```bash
+arbor completion zsh --no-descriptions
+```
+
+When run in an interactive terminal without `--stdout`, Arbor installs the completion file and updates shell startup files where needed.
+
+### `arbor version`
+
+Print the Arbor version:
+
+```bash
+arbor version
+```
 
 ## Config
+
 Arbor uses `.arbor.yaml` at the repo root by default.
 
 Example:
@@ -94,10 +269,11 @@ presets:
 ### Config Sections
 
 #### `defaults`
+
 Defines fallback behavior Arbor uses when the command line or a preset does not override it.
 
 - `base_ref`: branch or commit used as the default source for new branches.
-- `env_action`: default action for env files. Valid values are `symlink`, `copy`, and `skip`.
+- `env_action`: default env action for env files. Valid values are `symlink`, `copy`, and `skip`.
 - `command_scope`: default execution scope for commands. Current value is `per_worktree`.
 - `trusted_auto_run`: allows trusted preset commands to execute automatically.
 - `open_app`: executable Arbor runs after setup to open the created worktree folder.
@@ -118,6 +294,7 @@ defaults:
 When `open_app` is set, Arbor waits for env actions and approved commands to finish, then runs `<open_app> <worktree-path>` for the created worktree.
 
 #### `env_files`
+
 Declares env files that Arbor should offer during worktree setup. These entries can override or replace automatically detected env-file candidates.
 
 - `id`: stable identifier used by presets.
@@ -138,11 +315,13 @@ env_files:
 ```
 
 What it does:
+
 - Offers `.env.shared` as a candidate during `arbor create`.
 - Places it at `.env` inside the new worktree.
 - Uses `symlink` unless the user or preset changes it.
 
 #### `commands`
+
 Defines runnable setup commands that Arbor can show or execute after creating a worktree.
 
 - `id`: stable identifier used by presets.
@@ -163,22 +342,24 @@ commands:
 ```
 
 What it does:
+
 - Shows `Bootstrap` as a selectable setup step.
 - Runs `pnpm install` inside the new worktree.
 - Allows auto-run only when a preset selects it and trust rules permit it.
 
-Node projects also get built-in package detection from `package.json`. Arbor now offers package-manager-aware setup steps like `pnpm install` and, when present, `pnpm build` instead of prompting for every script in the file.
+Node projects also get built-in package detection from `package.json`. Arbor offers package-manager-aware setup steps like `pnpm install` and, when present, `pnpm build` instead of prompting for every script in the file.
 
 #### `presets`
+
 Presets are saved setup profiles. They do not define new env files or new commands by themselves. Instead, they select from the `env_files` and `commands` you already defined and bundle those choices under a reusable name.
 
 Use a preset when you want Arbor to answer the same setup questions the same way every time for a certain workflow, such as `fast`, `full`, `backend`, or `review`.
 
-- preset name: the key under `presets`, such as `fast` or `full`.
-- `description`: short explanation of the preset.
-- `env_selection`: list of `env_files` IDs to preselect.
-- `commands`: list of command IDs to preselect.
-- `auto_run`: requests automatic execution for selected commands, subject to trust rules.
+- preset name: the key under `presets`, such as `fast` or `full`
+- `description`: short explanation of the preset
+- `env_selection`: list of `env_files` IDs to preselect
+- `commands`: list of command IDs to preselect
+- `auto_run`: requests automatic execution for selected commands, subject to trust rules
 
 Example:
 
@@ -192,6 +373,7 @@ presets:
 ```
 
 What it does:
+
 - Preselects the env file with ID `env`.
 - Preselects the command with ID `bootstrap`.
 - If `bootstrap` is marked `trusted: true` and `defaults.trusted_auto_run` is also `true`, Arbor runs it automatically.
@@ -203,24 +385,25 @@ Example usage:
 arbor create feature-auth --preset fast
 ```
 
-In that example, Arbor uses the `fast` profile instead of asking you to choose everything from scratch.
-
 Think of the relationship like this:
+
 - `env_files` says which env-file options exist.
 - `commands` says which setup commands exist.
 - `presets` says which of those options should be selected together for a named workflow.
 
 #### `templates`
+
 Provides reusable templates for naming branches and worktree paths.
 
-- `branch`: template used to generate branch names.
-- `worktree`: template used to generate worktree paths.
+- `branch`: template used to generate branch names
+- `worktree`: template used to generate worktree paths
 
 Template variables currently used by Arbor:
-- `.Name`: worktree input name.
-- `.Repo`: repo directory name.
-- `.Base`: selected base ref.
-- `.Branch`: resolved branch name when rendering worktree paths.
+
+- `.Name`: worktree input name
+- `.Repo`: repo directory name
+- `.Base`: selected base ref
+- `.Branch`: resolved branch name when rendering worktree paths
 
 Example:
 
@@ -231,10 +414,12 @@ templates:
 ```
 
 What it does:
+
 - Turns a worktree named `auth` into branch `feature/auth`.
 - Places the worktree next to the repo as `../myrepo-auth`.
 
 ### Config Precedence
+
 Arbor resolves config in this order:
 
 1. CLI flags
@@ -243,43 +428,22 @@ Arbor resolves config in this order:
 4. Built-in detection
 
 ### Notes
+
 - Config-defined env files override duplicate auto-detected env targets.
 - If no config file exists, Arbor still works using detection and command-line flags.
-- In interactive mode, Arbor asks for an optional branch prefix and applies it to both the branch name (`<prefix>/<name>`) and the default worktree folder name.
-- `--branch` reuses an existing local branch and cannot be combined with `--base` or `--branch-template`.
+- In interactive mode, Arbor asks for unresolved input and applies the resolved choices to the worktree plan before execution.
 - `arbor init` writes a starter `.arbor.yaml` you can edit for your repo.
 
-## Examples
-Preview detection only:
-
-```bash
-go run ./cmd/arbor detect
-```
-
-Validate a specific config:
-
-```bash
-go run ./cmd/arbor --config .arbor.yaml config validate
-```
-
-Create with a preset:
-
-```bash
-go run ./cmd/arbor create feature-auth --preset fast --non-interactive
-```
-
-Create a review worktree from an existing branch:
-
-```bash
-go run ./cmd/arbor create review-auth --branch feature-auth --non-interactive
-```
-
 ## Failure Modes
+
 - Existing branch name: Arbor reports the branch conflict and skips creation.
 - Existing target env path: Arbor reports the file conflict and leaves the target untouched.
 - Invalid config: Arbor stops before execution and returns the YAML validation error.
 - Command failure: Arbor records the failing command and exit code in the execution summary.
 
-## Docs
-- [Deploy for dev testing](docs/deploy.md)
-- [Release checklist](docs/release.md)
+## Developer Docs
+
+- [README.md](/Users/simon/work/github/arbor/README.md): end-user install and usage guide
+- [docs/deploy.md](/Users/simon/work/github/arbor/docs/deploy.md): local dev deployment and manual testing
+- [docs/deploy-brew.md](/Users/simon/work/github/arbor/docs/deploy-brew.md): Homebrew deployment
+- [docs/release.md](/Users/simon/work/github/arbor/docs/release.md): release checklist

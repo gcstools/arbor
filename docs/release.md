@@ -18,10 +18,12 @@
 ## Homebrew release
 1. Confirm the `HOMEBREW_TAP_TOKEN` secret is configured in `gcstools/arbor`.
 2. Confirm `gcstools/homebrew-tap` exists and allows the token to push commits.
-3. Push a semver tag such as `v0.1.0` to trigger `.github/workflows/release-homebrew.yml`.
-4. Confirm the workflow publishes release archives to `gcstools/arbor`.
-5. Confirm the workflow updates `Formula/arbor.rb` in `gcstools/homebrew-tap`.
-6. Verify install with `brew install gcstools/tap/arbor`.
+3. Merge release-ready changes to `main` using Conventional Commits so `.github/workflows/release-please.yml` can calculate the next version.
+4. Confirm `release-please` opens or updates the release PR with the expected version tag.
+5. Merge the release PR to create the GitHub release and version tag.
+6. Confirm `.github/workflows/release-homebrew.yml` publishes release archives to `gcstools/arbor`.
+7. Confirm the workflow updates `Formula/arbor.rb` in `gcstools/homebrew-tap`.
+8. Verify install with `brew install gcstools/tap/arbor`.
 
 ## Docs
 1. Review `README.md`.

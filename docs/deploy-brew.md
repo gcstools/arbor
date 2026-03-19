@@ -5,22 +5,23 @@ This repo publishes Arbor to Homebrew through GitHub Actions.
 - Source repo: `gcstools/arbor`
 - Tap repo: `gcstools/homebrew-tap`
 - Install command: `brew install gcstools/tap/arbor`
-- Release workflow: `.github/workflows/release-homebrew.yml`
+- Release PR workflow: `.github/workflows/release-please.yml`
+- Publish workflow: `.github/workflows/release-homebrew.yml`
 
 ## How the deploy works
 
-Deploying to Homebrew is tag-driven, not branch-driven.
+Deploying to Homebrew is release-driven.
 
-Pushing to `main` does not publish a Homebrew release by itself. It only updates the code that will be used the next time you create a version tag.
+Pushing to `main` does not publish a Homebrew release by itself. It updates or opens a release PR through `release-please`.
 
-When you push a tag that matches `v*`, for example `v0.1.0`, GitHub Actions will:
+When you merge that release PR, `release-please` creates the GitHub release and version tag. The publish workflow then:
 
 1. Run `go test ./...`
 2. Build release archives for:
    - macOS arm64
    - macOS amd64
    - Linux amd64
-3. Create or update the GitHub Release in `gcstools/arbor`
+3. Upload release archives to the GitHub Release in `gcstools/arbor`
 4. Compute archive SHA256 checksums
 5. Update `Formula/arbor.rb` in `gcstools/homebrew-tap`
 6. Push the formula commit to the tap repo
@@ -60,15 +61,15 @@ Path in GitHub UI:
 
 ### 1. Merge the release-ready code to `main`
 
-The tag should point at the commit you want to release. In normal use, that means:
+In normal use:
 
 1. Merge your changes to `main`
-2. Pull the latest `main` locally
-3. Create the release tag from that commit
+2. Wait for `release-please` to open or update the release PR
+3. Review the proposed version and release notes
 
 ### 2. Sanity-check locally
 
-Before tagging, run:
+Before merging the release PR, run:
 
 ```bash
 go test ./...
@@ -76,24 +77,20 @@ go run ./cmd/arbor --help
 go run ./cmd/arbor version
 ```
 
-### 3. Create and push a version tag
+### 3. Merge the release PR
 
-Example:
+Merging the release PR is the deploy trigger. `release-please` creates the version tag and GitHub release automatically.
 
-```bash
-git checkout main
-git pull origin main
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-That tag push is the deploy trigger.
-
-You do not need to push `main` again after tagging if the tag already points to the correct commit.
+You do not need to create or push tags locally for normal releases.
 
 ### 4. Watch the workflow
 
-In GitHub Actions, open the `release-homebrew` workflow and confirm that these jobs pass:
+In GitHub Actions, confirm:
+
+- `release-please` updated or created the release PR after the `main` merge
+- `release-homebrew` ran after the release was published
+
+In `release-homebrew`, confirm these jobs pass:
 
 - `test`
 - `build`
@@ -126,23 +123,23 @@ brew install gcstools/tap/arbor
 
 ## Operational notes
 
-- The release version comes from the Git tag, for example `v0.1.0`.
+- The release version comes from `release-please`, based on Conventional Commits.
+- The published tag is still in `v0.1.0` form.
 - The Homebrew formula version is written without the leading `v`.
 - If you retag the same version after a failed release, clean up the bad tag/release state first instead of forcing over it blindly.
 - The workflow updates the formula automatically. You do not need to edit `gcstools/homebrew-tap` by hand for normal releases.
+- Commit messages on merged PRs should follow Conventional Commits so version bumps are accurate.
 
 ## Troubleshooting
 
 ### The workflow did not run
 
-Check that the pushed tag matches the workflow trigger:
+Check which stage failed:
 
-- `v*`
+- `release-please.yml` runs on pushes to `main`
+- `release-homebrew.yml` runs on `release.published`
 
-Examples that will run:
-
-- `v0.1.0`
-- `v1.2.3`
+If the release PR was merged but the publish workflow did not run, confirm a GitHub Release was actually published.
 
 ### The workflow cannot push to the tap repo
 
