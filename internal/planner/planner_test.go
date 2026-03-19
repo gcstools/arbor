@@ -385,7 +385,7 @@ func initRepo(t *testing.T) string {
 	}
 
 	root := t.TempDir()
-	runGit(t, root, "init")
+	runGit(t, root, "init", "-b", "main")
 	runGit(t, root, "config", "user.email", "test@example.com")
 	runGit(t, root, "config", "user.name", "Test User")
 	writeFile(t, filepath.Join(root, "README.md"), "hello")

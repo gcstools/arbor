@@ -19,6 +19,12 @@ arbor version
 arbor --help
 ```
 
+Running from source during development:
+
+```bash
+go run ./cmd/arbor --help
+```
+
 ## What Arbor Does
 
 Arbor helps you spin up a new worktree without repeating the same setup steps by hand.
