@@ -99,6 +99,55 @@ func TestBuildCreatePlanInteractivePrompts(t *testing.T) {
 	}
 }
 
+func TestBuildCreatePlanInteractivePromptsCarryEnvActionForward(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".env"), "A=1")
+	writeFile(t, filepath.Join(root, ".env.prod"), "A=1")
+	writeFile(t, filepath.Join(root, ".env.test"), "A=1")
+
+	input := bytes.NewBufferString("symlink\n\n\n")
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, input, ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if len(plan.Worktrees[0].EnvActions) != 3 {
+		t.Fatalf("expected 3 env actions, got %#v", plan.Worktrees[0].EnvActions)
+	}
+	for _, env := range plan.Worktrees[0].EnvActions {
+		if env.Action != "symlink" {
+			t.Fatalf("expected symlink for all env actions, got %#v", plan.Worktrees[0].EnvActions)
+		}
+	}
+}
+
+func TestBuildCreatePlanInteractivePromptsUpdateCarriedEnvDefault(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".env"), "A=1")
+	writeFile(t, filepath.Join(root, ".env.prod"), "A=1")
+	writeFile(t, filepath.Join(root, ".env.test"), "A=1")
+
+	input := bytes.NewBufferString("copy\nskip\n\n")
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, input, ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].EnvActions[0].Action; got != "copy" {
+		t.Fatalf("expected first env action copy, got %q", got)
+	}
+	if got := plan.Worktrees[0].EnvActions[1].Action; got != "skip" {
+		t.Fatalf("expected second env action skip, got %q", got)
+	}
+	if got := plan.Worktrees[0].EnvActions[2].Action; got != "skip" {
+		t.Fatalf("expected third env action to inherit skip, got %q", got)
+	}
+}
+
 func TestBuildCreatePlanInteractivePrefixPromptUsesSelectedPrefixWithoutConfig(t *testing.T) {
 	root := initRepo(t)
 

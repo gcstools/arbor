@@ -347,8 +347,13 @@ func buildDefaultCommandPlans(candidates []model.CommandCandidate, cfg *config.F
 }
 
 func promptForSelections(reader *bufio.Reader, worktree *model.WorktreePlan, cfg *config.File, presetName string) error {
+	lastEnvAction := model.Action("")
 	for i := range worktree.EnvActions {
 		defaultAction := worktree.EnvActions[i].Action
+		if lastEnvAction != "" {
+			defaultAction = lastEnvAction
+			worktree.EnvActions[i].Action = defaultAction
+		}
 		prompt := formatEnvPrompt(worktree.Name, worktree.EnvActions[i].Candidate.TargetPath, defaultAction)
 		value, err := promptValue(reader, prompt)
 		if err != nil {
@@ -362,6 +367,7 @@ func promptForSelections(reader *bufio.Reader, worktree *model.WorktreePlan, cfg
 			return err
 		}
 		worktree.EnvActions[i].Action = action
+		lastEnvAction = action
 	}
 
 	autoRun := cfg != nil && cfg.ResolveTrustedAutoRun(presetName)
