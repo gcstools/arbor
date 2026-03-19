@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/gcstools/arbor/compare/arbor-v0.2.0...arbor-v0.2.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* prevent ci from running for release please pr ([ef26fa3](https://github.com/gcstools/arbor/commit/ef26fa39d2d9a971da7394ac78b0af0b107fb401))
+* yaml format ([1ae554b](https://github.com/gcstools/arbor/commit/1ae554be423170f3340ccc87241082d10305a7b2))
+
 ## [0.2.0](https://github.com/gcstools/arbor/compare/arbor-v0.1.1...arbor-v0.2.0) (2026-03-19)
 
 
