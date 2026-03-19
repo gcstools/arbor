@@ -22,6 +22,7 @@ type RepoState struct {
 	Root          string
 	CurrentRef    string
 	CurrentCommit string
+	LocalBranches []string
 	Worktrees     []Worktree
 }
 
@@ -49,6 +50,10 @@ func DiscoverRepo(ctx context.Context, start string) (RepoState, error) {
 	if err != nil {
 		return RepoState{}, err
 	}
+	branches, err := runner.LocalBranches(ctx)
+	if err != nil {
+		return RepoState{}, err
+	}
 	worktrees, err := runner.ListWorktrees(ctx)
 	if err != nil {
 		return RepoState{}, err
@@ -58,6 +63,7 @@ func DiscoverRepo(ctx context.Context, start string) (RepoState, error) {
 		Root:          root,
 		CurrentRef:    ref,
 		CurrentCommit: commit,
+		LocalBranches: branches,
 		Worktrees:     worktrees,
 	}, nil
 }
@@ -140,6 +146,23 @@ func (r Runner) BranchExists(ctx context.Context, branch string) (bool, error) {
 		return false, err
 	}
 	return strings.TrimSpace(out) != "", nil
+}
+
+func (r Runner) LocalBranches(ctx context.Context) ([]string, error) {
+	out, err := r.run(ctx, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	branches := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		branches = append(branches, line)
+	}
+	return branches, nil
 }
 
 func (r Runner) CreateBranch(ctx context.Context, branch string, baseRef string) error {

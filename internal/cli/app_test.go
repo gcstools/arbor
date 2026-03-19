@@ -34,9 +34,12 @@ func TestVersionCommand(t *testing.T) {
 	}
 
 	got := out.String()
-	for _, want := range []string{"arbor ", "commit:", "built:"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("version output missing %q:\n%s", want, got)
+	if !strings.HasPrefix(got, "arbor ") {
+		t.Fatalf("version output missing version prefix:\n%s", got)
+	}
+	for _, unwanted := range []string{"commit:", "built:"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("version output should not include %q:\n%s", unwanted, got)
 		}
 	}
 }
@@ -246,6 +249,26 @@ func TestCreateCommandPlanningOutput(t *testing.T) {
 	}
 }
 
+func TestCreateCommandPlanningOutputWithExistingBranch(t *testing.T) {
+	root := initRepo(t)
+	runGit(t, root, "branch", "feature/auth", "HEAD")
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	runInDir(t, root, func() {
+		if err := Execute([]string{"create", "--branch", "feature/auth", "--non-interactive", "--plan"}, IOStreams{
+			In:     bytes.NewBuffer(nil),
+			Out:    &out,
+			ErrOut: &errOut,
+		}); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	})
+	if !strings.Contains(out.String(), "branch mode: existing") {
+		t.Fatalf("unexpected output: %s", out.String())
+	}
+}
+
 func TestCreateCommandExecutes(t *testing.T) {
 	root := initRepo(t)
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("A=1"), 0o644); err != nil {
@@ -264,6 +287,29 @@ func TestCreateCommandExecutes(t *testing.T) {
 		}
 	})
 	if !strings.Contains(out.String(), "created: true") {
+		t.Fatalf("unexpected output: %s", out.String())
+	}
+}
+
+func TestCreateCommandExecutesWithExistingBranch(t *testing.T) {
+	root := initRepo(t)
+	runGit(t, root, "branch", "feature/auth", "HEAD")
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	runInDir(t, root, func() {
+		if err := Execute([]string{"create", "review-auth", "--branch", "feature/auth", "--non-interactive"}, IOStreams{
+			In:     bytes.NewBuffer(nil),
+			Out:    &out,
+			ErrOut: &errOut,
+		}); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	})
+	if !strings.Contains(out.String(), "created: true") {
+		t.Fatalf("unexpected output: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "worktree feature/auth") {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 }

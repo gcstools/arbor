@@ -8,9 +8,17 @@ const (
 	ActionSkip    Action = "skip"
 )
 
+type BranchMode string
+
+const (
+	BranchModeCreate   BranchMode = "create"
+	BranchModeExisting BranchMode = "existing"
+)
+
 type WorktreePlan struct {
 	Name       string             `yaml:"name" json:"name"`
 	Branch     string             `yaml:"branch" json:"branch"`
+	BranchMode BranchMode         `yaml:"branch_mode,omitempty" json:"branch_mode,omitempty"`
 	BaseRef    string             `yaml:"base_ref,omitempty" json:"base_ref,omitempty"`
 	Path       string             `yaml:"path" json:"path"`
 	Preset     string             `yaml:"preset,omitempty" json:"preset,omitempty"`

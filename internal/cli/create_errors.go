@@ -49,6 +49,22 @@ func formatCreatePlanError(err error) error {
 		message = "The target worktree path is already in use.\n" +
 			"Details: " + err.Error() + ".\n" +
 			"Next step: remove the existing directory or choose a different worktree name or path template."
+	case strings.Contains(err.Error(), "--branch cannot be used with --branch-template"):
+		message = "Arbor could not combine the requested branch options.\n" +
+			"Details: `--branch` reuses an existing branch, so `--branch-template` is not allowed.\n" +
+			"Next step: remove `--branch-template` or omit `--branch` to create a new branch."
+	case strings.Contains(err.Error(), "--branch cannot be used with --base"):
+		message = "Arbor could not combine the requested branch options.\n" +
+			"Details: `--branch` reuses an existing branch, so `--base` is not allowed.\n" +
+			"Next step: remove `--base` or omit `--branch` to create a new branch from a base ref."
+	case strings.Contains(err.Error(), "branch does not exist"):
+		message = "Arbor could not find the requested branch.\n" +
+			"Details: " + err.Error() + ".\n" +
+			"Next step: create or fetch that local branch first, then rerun the command."
+	case strings.Contains(err.Error(), "branch already has a worktree"):
+		message = "The requested branch is already attached to a worktree.\n" +
+			"Details: " + err.Error() + ".\n" +
+			"Next step: use a different branch or remove the existing worktree first."
 	case strings.Contains(err.Error(), "branch template for"):
 		message = "Arbor could not build the branch name for this worktree.\n" +
 			"Details: " + err.Error() + ".\n" +
@@ -126,10 +142,12 @@ func formatWorktreeErrorSummary(worktree model.WorktreeResult) string {
 	switch {
 	case strings.Contains(worktree.Error, "branch already exists"):
 		return fmt.Sprintf("Arbor did not create this worktree because the branch %q already exists. Choose a different name or branch.", worktree.Branch)
+	case strings.Contains(worktree.Error, "already checked out"):
+		return fmt.Sprintf("Arbor could not add the worktree because branch %q is already attached to another worktree. Details: %s", worktree.Branch, worktree.Error)
 	case strings.Contains(worktree.Error, "git branch "):
 		return fmt.Sprintf("Arbor could not create the Git branch %q before adding the worktree. Details: %s", worktree.Branch, worktree.Error)
 	case strings.Contains(worktree.Error, "git worktree add "):
-		return fmt.Sprintf("Arbor created the branch %q but could not add the worktree at %q. Details: %s", worktree.Branch, worktree.Path, worktree.Error)
+		return fmt.Sprintf("Arbor could not add the worktree for branch %q at %q. Details: %s", worktree.Branch, worktree.Path, worktree.Error)
 	default:
 		if worktree.Created {
 			return "Arbor created the worktree, but one or more setup steps failed."

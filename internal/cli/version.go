@@ -11,16 +11,10 @@ import (
 func newVersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print Arbor version information.",
+		Short: "Print Arbor version.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintf(
-				cmd.OutOrStdout(),
-				"arbor %s\ncommit: %s\nbuilt: %s\n",
-				version.Number,
-				version.Commit,
-				version.Date,
-			)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "arbor %s\n", version.Number)
 			return err
 		},
 	}

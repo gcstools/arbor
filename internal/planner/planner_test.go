@@ -30,8 +30,113 @@ func TestBuildCreatePlanSingleName(t *testing.T) {
 	if plan.Worktrees[0].Branch != "feature-auth" {
 		t.Fatalf("unexpected branch: %#v", plan.Worktrees[0])
 	}
+	if plan.Worktrees[0].BranchMode != "create" {
+		t.Fatalf("unexpected branch mode: %#v", plan.Worktrees[0])
+	}
 	if !strings.Contains(RenderSummary(plan), "planning only") {
 		t.Fatal("expected planning summary")
+	}
+}
+
+func TestBuildCreatePlanWithExistingBranchUsesBranchNameByDefault(t *testing.T) {
+	root := initRepo(t)
+	runGit(t, root, "branch", "feature/auth", "main")
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Branch:         "feature/auth",
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Name; got != "feature/auth" {
+		t.Fatalf("unexpected worktree name: %q", got)
+	}
+	if got := plan.Worktrees[0].Branch; got != "feature/auth" {
+		t.Fatalf("unexpected branch: %q", got)
+	}
+	if got := plan.Worktrees[0].BranchMode; got != "existing" {
+		t.Fatalf("unexpected branch mode: %q", got)
+	}
+}
+
+func TestBuildCreatePlanWithExistingBranchAllowsCustomWorktreeName(t *testing.T) {
+	root := initRepo(t)
+	runGit(t, root, "branch", "feature/auth", "main")
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Names:          []string{"review-auth"},
+		Branch:         "feature/auth",
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Name; got != "review-auth" {
+		t.Fatalf("unexpected worktree name: %q", got)
+	}
+	if got := plan.Worktrees[0].Branch; got != "feature/auth" {
+		t.Fatalf("unexpected branch: %q", got)
+	}
+}
+
+func TestBuildCreatePlanRejectsMissingExistingBranch(t *testing.T) {
+	root := initRepo(t)
+
+	_, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Branch:         "feature/auth",
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err == nil || !strings.Contains(err.Error(), "branch does not exist") {
+		t.Fatalf("expected missing branch error, got %v", err)
+	}
+}
+
+func TestBuildCreatePlanRejectsBranchFlagWithBranchTemplate(t *testing.T) {
+	root := initRepo(t)
+	runGit(t, root, "branch", "feature/auth", "main")
+
+	_, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Branch:         "feature/auth",
+		BranchTemplate: "feature/{{ .Name }}",
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err == nil || !strings.Contains(err.Error(), "--branch cannot be used with --branch-template") {
+		t.Fatalf("expected branch/template conflict, got %v", err)
+	}
+}
+
+func TestBuildCreatePlanRejectsBranchFlagWithBase(t *testing.T) {
+	root := initRepo(t)
+	runGit(t, root, "branch", "feature/auth", "main")
+
+	_, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Branch:         "feature/auth",
+		BaseRef:        "main",
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err == nil || !strings.Contains(err.Error(), "--branch cannot be used with --base") {
+		t.Fatalf("expected branch/base conflict, got %v", err)
+	}
+}
+
+func TestBuildCreatePlanRejectsExistingBranchAlreadyInWorktree(t *testing.T) {
+	root := initRepo(t)
+	worktreePath := filepath.Join(filepath.Dir(root), "repo-feature-auth")
+	runGit(t, root, "worktree", "add", worktreePath, "-b", "feature/auth")
+
+	_, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Branch:         "feature/auth",
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err == nil || !strings.Contains(err.Error(), "branch already has a worktree") {
+		t.Fatalf("expected existing worktree error, got %v", err)
 	}
 }
 

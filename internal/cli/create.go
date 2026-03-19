@@ -13,6 +13,7 @@ import (
 
 func newCreateCommand(opts *Options) *cobra.Command {
 	var preset string
+	var branch string
 	var baseRef string
 	var openApp string
 	var branchTemplate string
@@ -31,6 +32,7 @@ func newCreateCommand(opts *Options) *cobra.Command {
 			plan, err := planner.BuildCreatePlan(context.Background(), planner.Inputs{
 				CWD:            cwd,
 				Names:          args,
+				Branch:         branch,
 				BaseRef:        baseRef,
 				Preset:         preset,
 				OpenApp:        openApp,
@@ -58,6 +60,7 @@ func newCreateCommand(opts *Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&preset, "preset", "", "preset to apply")
+	cmd.Flags().StringVar(&branch, "branch", "", "existing branch to attach the worktree to")
 	cmd.Flags().StringVar(&baseRef, "base", "", "base branch or commit")
 	cmd.Flags().StringVar(&openApp, "open-app", "", "app executable to open the created worktree folder")
 	cmd.Flags().StringVar(&branchTemplate, "branch-template", "", "branch naming template")

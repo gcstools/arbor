@@ -21,6 +21,7 @@ import (
 type Inputs struct {
 	CWD            string
 	Names          []string
+	Branch         string
 	BaseRef        string
 	Preset         string
 	OpenApp        string
@@ -61,6 +62,9 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 	if err != nil {
 		return CreatePlan{}, err
 	}
+	if err := validateBranchInputs(input); err != nil {
+		return CreatePlan{}, err
+	}
 	baseRef := firstNonEmpty(input.BaseRef, cfg.Defaults.BaseRef, repoState.CurrentRef, repoState.CurrentCommit)
 	openApp := firstNonEmpty(input.OpenApp, cfg.Defaults.OpenApp)
 	branchTemplate := firstNonEmpty(input.BranchTemplate, promptBranchTemplate, cfg.Templates.Branch)
@@ -75,14 +79,29 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 
 	repoName := filepath.Base(repoState.Root)
 	name := names[0]
-	branch, err := config.RenderTemplate(branchTemplate, config.TemplateData{
-		Name:  name,
-		Index: 1,
-		Base:  baseRef,
-		Repo:  repoName,
-	})
-	if err != nil {
-		return CreatePlan{}, fmt.Errorf("branch template for %q: %w", name, err)
+	branchMode := model.BranchModeCreate
+	branch := strings.TrimSpace(input.Branch)
+	if branch != "" {
+		branchMode = model.BranchModeExisting
+		if name == "" {
+			name = branch
+		}
+		if !branchExists(repoState, branch) {
+			return CreatePlan{}, fmt.Errorf("branch does not exist %q", branch)
+		}
+		if existingPath, inUse := branchInUse(repoState, branch); inUse {
+			return CreatePlan{}, fmt.Errorf("branch already has a worktree %q at %q", branch, existingPath)
+		}
+	} else {
+		branch, err = config.RenderTemplate(branchTemplate, config.TemplateData{
+			Name:  name,
+			Index: 1,
+			Base:  baseRef,
+			Repo:  repoName,
+		})
+		if err != nil {
+			return CreatePlan{}, fmt.Errorf("branch template for %q: %w", name, err)
+		}
 	}
 	pathValue, err := config.RenderTemplate(pathTemplate, config.TemplateData{
 		Name:   name,
@@ -108,6 +127,7 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 	worktree := model.WorktreePlan{
 		Name:       name,
 		Branch:     branch,
+		BranchMode: branchMode,
 		BaseRef:    baseRef,
 		Path:       path,
 		Preset:     presetName,
@@ -138,6 +158,7 @@ func RenderSummary(plan CreatePlan) string {
 		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("worktree %s", worktree.Name))
 		lines = append(lines, fmt.Sprintf("  branch: %s", worktree.Branch))
+		lines = append(lines, fmt.Sprintf("  branch mode: %s", worktree.BranchMode))
 		lines = append(lines, fmt.Sprintf("  path: %s", worktree.Path))
 		lines = append(lines, fmt.Sprintf("  env actions: %s", summarizeEnvActions(worktree.EnvActions)))
 		lines = append(lines, fmt.Sprintf("  commands: %s", summarizeCommands(worktree.Commands)))
@@ -160,6 +181,11 @@ func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader 
 	promptPathTemplate := ""
 	if len(names) > 1 {
 		return nil, "", "", "", fmt.Errorf("exactly one worktree name is supported")
+	}
+	if len(names) == 0 {
+		if input.Branch != "" {
+			names = []string{strings.TrimSpace(input.Branch)}
+		}
 	}
 	if len(names) == 0 {
 		if input.NonInteractive {
@@ -492,4 +518,35 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func validateBranchInputs(input Inputs) error {
+	if input.Branch == "" {
+		return nil
+	}
+	if input.BranchTemplate != "" {
+		return fmt.Errorf("--branch cannot be used with --branch-template")
+	}
+	if input.BaseRef != "" {
+		return fmt.Errorf("--branch cannot be used with --base")
+	}
+	return nil
+}
+
+func branchExists(repoState gitutil.RepoState, branch string) bool {
+	for _, existing := range repoState.LocalBranches {
+		if existing == branch {
+			return true
+		}
+	}
+	return false
+}
+
+func branchInUse(repoState gitutil.RepoState, branch string) (string, bool) {
+	for _, worktree := range repoState.Worktrees {
+		if worktree.Branch == branch {
+			return worktree.Path, true
+		}
+	}
+	return "", false
 }

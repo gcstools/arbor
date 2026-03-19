@@ -6,6 +6,7 @@ Arbor is a Go CLI for creating a Git worktree and bootstrapping it with env file
 - Detect env files from common project patterns and repo config.
 - Detect setup commands from `package.json`, `Makefile`, `justfile`, and Arbor config.
 - Create one worktree with one branch per invocation.
+- Create a worktree from an existing local branch.
 - Apply env-file actions with `symlink`, `copy`, or `skip`.
 - Run trusted preset commands automatically or prompt for command approval.
 
@@ -36,6 +37,12 @@ Create and execute the worktree setup:
 
 ```bash
 go run ./cmd/arbor create feature-auth --non-interactive
+```
+
+Create a worktree from an existing local branch:
+
+```bash
+go run ./cmd/arbor create --branch feature-auth --non-interactive
 ```
 
 Create, run setup, and open the resulting worktree in a specific app:
@@ -239,6 +246,7 @@ Arbor resolves config in this order:
 - Config-defined env files override duplicate auto-detected env targets.
 - If no config file exists, Arbor still works using detection and command-line flags.
 - In interactive mode, Arbor asks for an optional branch prefix and applies it to both the branch name (`<prefix>/<name>`) and the default worktree folder name.
+- `--branch` reuses an existing local branch and cannot be combined with `--base` or `--branch-template`.
 - `arbor init` writes a starter `.arbor.yaml` you can edit for your repo.
 
 ## Examples
@@ -258,6 +266,12 @@ Create with a preset:
 
 ```bash
 go run ./cmd/arbor create feature-auth --preset fast --non-interactive
+```
+
+Create a review worktree from an existing branch:
+
+```bash
+go run ./cmd/arbor create review-auth --branch feature-auth --non-interactive
 ```
 
 ## Failure Modes

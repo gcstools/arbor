@@ -26,6 +26,20 @@ func TestFormatCreatePlanErrorWrapsNotGitRepository(t *testing.T) {
 	}
 }
 
+func TestFormatCreatePlanErrorMissingBranch(t *testing.T) {
+	err := formatCreatePlanError(errors.New(`branch does not exist "feature-auth"`))
+	if !strings.Contains(err.Error(), "could not find the requested branch") {
+		t.Fatalf("unexpected message: %s", err.Error())
+	}
+}
+
+func TestFormatCreatePlanErrorBranchAlreadyInWorktree(t *testing.T) {
+	err := formatCreatePlanError(errors.New(`branch already has a worktree "feature-auth" at "/tmp/repo-feature-auth"`))
+	if !strings.Contains(err.Error(), "already attached to a worktree") {
+		t.Fatalf("unexpected message: %s", err.Error())
+	}
+}
+
 func TestRenderExecutionSummaryBranchExists(t *testing.T) {
 	summary := model.ExecutionSummary{
 		RepoRoot:   "/repo",

@@ -7,7 +7,8 @@ Use `README.md` as the end-user guide. See [DOCS.md](DOCS.md) for the preserved 
 ## What Arbor Handles
 - Detects likely env files from your repo and `.arbor.yaml`.
 - Detects setup commands from project files such as `package.json`, `Makefile`, and `justfile`.
-- Creates a worktree from a base branch or commit.
+- Creates a worktree with a new branch from a base branch or commit.
+- Creates a worktree from an existing local branch.
 - Applies env-file actions with `symlink`, `copy`, or `skip`.
 - Runs trusted setup commands automatically when a preset allows it.
 
@@ -70,6 +71,12 @@ Create a worktree without prompts:
 go run ./cmd/arbor create feature-auth --non-interactive
 ```
 
+Create a worktree from an existing branch:
+
+```bash
+go run ./cmd/arbor create --branch feature-auth --non-interactive
+```
+
 Create a worktree and open it in an app after setup:
 
 ```bash
@@ -82,7 +89,7 @@ go run ./cmd/arbor create feature-auth --non-interactive --open-app cursor
 - `arbor detect`: preview detected env files and setup commands without changing Git state.
 - `arbor create [name...]`: create one or more worktrees and run setup actions.
 - `arbor pull`: pull the main worktree when it has no local changes.
-- `arbor version`: print the release version, commit, and build date.
+- `arbor version`: print the release version.
 
 ## Minimal Config
 Arbor reads `.arbor.yaml` from the repo root by default.
@@ -138,9 +145,16 @@ Preview a non-interactive run before executing it:
 go run ./cmd/arbor create feature-auth --preset fast --plan
 ```
 
+Preview a reused-branch worktree with a custom folder name:
+
+```bash
+go run ./cmd/arbor create review-auth --branch feature-auth --non-interactive --plan
+```
+
 ## Notes
 - In interactive mode, `arbor create` prompts for any unresolved choices before creating the worktree.
 - In non-interactive mode, Arbor requires enough config and flags to resolve the run without prompts.
+- `--branch` reuses an existing local branch and cannot be combined with `--base` or `--branch-template`.
 - If an env target already exists or a branch name already exists, Arbor reports the conflict and skips the unsafe action.
 
 ## More Docs

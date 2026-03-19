@@ -39,24 +39,26 @@ func (r Runner) Apply(ctx context.Context, plan planner.CreatePlan) (model.Execu
 			Branch: worktree.Branch,
 		}
 
-		exists, err := git.BranchExists(ctx, worktree.Branch)
-		if err != nil {
-			result.Error = err.Error()
-			summary.HasFailure = true
-			summary.Worktrees = append(summary.Worktrees, result)
-			continue
-		}
-		if exists {
-			result.Error = fmt.Sprintf("branch already exists %q", worktree.Branch)
-			summary.HasFailure = true
-			summary.Worktrees = append(summary.Worktrees, result)
-			continue
-		}
-		if err := git.CreateBranch(ctx, worktree.Branch, worktree.BaseRef); err != nil {
-			result.Error = err.Error()
-			summary.HasFailure = true
-			summary.Worktrees = append(summary.Worktrees, result)
-			continue
+		if worktree.BranchMode != model.BranchModeExisting {
+			exists, err := git.BranchExists(ctx, worktree.Branch)
+			if err != nil {
+				result.Error = err.Error()
+				summary.HasFailure = true
+				summary.Worktrees = append(summary.Worktrees, result)
+				continue
+			}
+			if exists {
+				result.Error = fmt.Sprintf("branch already exists %q", worktree.Branch)
+				summary.HasFailure = true
+				summary.Worktrees = append(summary.Worktrees, result)
+				continue
+			}
+			if err := git.CreateBranch(ctx, worktree.Branch, worktree.BaseRef); err != nil {
+				result.Error = err.Error()
+				summary.HasFailure = true
+				summary.Worktrees = append(summary.Worktrees, result)
+				continue
+			}
 		}
 		if err := git.AddWorktree(ctx, worktree.Path, worktree.Branch); err != nil {
 			result.Error = err.Error()

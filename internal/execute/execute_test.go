@@ -78,6 +78,33 @@ func TestApplyRunsCommand(t *testing.T) {
 	}
 }
 
+func TestApplyUsesExistingBranchWithoutCreatingIt(t *testing.T) {
+	root := initRepo(t)
+	runGit(t, root, "branch", "feature/existing", "main")
+	worktreePath := filepath.Join(filepath.Dir(root), "repo-existing")
+
+	summary, err := Runner{}.Apply(context.Background(), planner.CreatePlan{
+		RepoState: gitutil.RepoState{Root: root},
+		Worktrees: []model.WorktreePlan{
+			{
+				Name:       "existing",
+				Branch:     "feature/existing",
+				BranchMode: model.BranchModeExisting,
+				Path:       worktreePath,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+	if summary.HasFailure {
+		t.Fatalf("unexpected failure: %#v", summary)
+	}
+	if !summary.Worktrees[0].Created {
+		t.Fatal("expected worktree created")
+	}
+}
+
 func TestApplyRejectsExistingBranch(t *testing.T) {
 	root := initRepo(t)
 	runGit(t, root, "branch", "feature", "main")
