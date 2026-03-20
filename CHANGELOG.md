@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/gcstools/arbor/compare/arbor-v0.2.1...arbor-v0.3.0) (2026-03-20)
+
+
+### Features
+
+* detect monorepo envs ([6e83813](https://github.com/gcstools/arbor/commit/6e83813900daa9db9e3e32bf250faf5894de5c33))
+
 ## [0.2.1](https://github.com/gcstools/arbor/compare/arbor-v0.2.0...arbor-v0.2.1) (2026-03-19)
 
 
