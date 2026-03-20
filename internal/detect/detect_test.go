@@ -14,6 +14,7 @@ func TestDetectEnvFiles(t *testing.T) {
 	writeFile(t, filepath.Join(root, ".env"), "A=1")
 	writeFile(t, filepath.Join(root, ".env.local"), "A=1")
 	writeFile(t, filepath.Join(root, ".env.example"), "A=1")
+	writeFile(t, filepath.Join(root, "apps", "web", ".env.local"), "A=1")
 
 	cfg := &config.File{
 		Defaults: config.Defaults{EnvAction: model.ActionCopy},
@@ -32,11 +33,87 @@ func TestDetectEnvFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DetectEnvFiles returned error: %v", err)
 	}
-	if len(candidates) != 3 {
+	if len(candidates) != 5 {
 		t.Fatalf("got %d candidates", len(candidates))
 	}
 	if candidates[0].ID != "custom-env" {
 		t.Fatalf("expected config candidate first, got %#v", candidates[0])
+	}
+}
+
+func TestDetectEnvFilesFindsNestedEnvFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".env"), "A=1")
+	writeFile(t, filepath.Join(root, "apps", "web", ".env.local"), "A=1")
+	writeFile(t, filepath.Join(root, "packages", "api", ".env.test"), "A=1")
+	writeFile(t, filepath.Join(root, "packages", "api", ".env.example"), "A=1")
+
+	candidates, err := DetectEnvFiles(root, nil)
+	if err != nil {
+		t.Fatalf("DetectEnvFiles returned error: %v", err)
+	}
+	if len(candidates) != 3 {
+		t.Fatalf("got %d candidates", len(candidates))
+	}
+
+	targets := make(map[string]model.EnvCandidate, len(candidates))
+	for _, candidate := range candidates {
+		targets[candidate.TargetPath] = candidate
+	}
+
+	for _, target := range []string{".env", filepath.Join("apps", "web", ".env.local"), filepath.Join("packages", "api", ".env.test")} {
+		candidate, ok := targets[target]
+		if !ok {
+			t.Fatalf("missing target %q in %#v", target, candidates)
+		}
+		if candidate.Label != target {
+			t.Fatalf("expected label %q, got %#v", target, candidate)
+		}
+	}
+}
+
+func TestDetectEnvFilesConfigOverridesNestedTarget(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "apps", "web", ".env.local"), "A=1")
+	writeFile(t, filepath.Join(root, "shared", ".env.web"), "A=1")
+
+	cfg := &config.File{
+		Defaults: config.Defaults{EnvAction: model.ActionCopy},
+		EnvFiles: []config.EnvFileRule{
+			{
+				ID:         "web-env",
+				Label:      "Web env",
+				SourcePath: "shared/.env.web",
+				TargetPath: filepath.Join("apps", "web", ".env.local"),
+			},
+		},
+	}
+
+	candidates, err := DetectEnvFiles(root, cfg)
+	if err != nil {
+		t.Fatalf("DetectEnvFiles returned error: %v", err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("got %d candidates", len(candidates))
+	}
+
+	targets := make(map[string]model.EnvCandidate, len(candidates))
+	for _, candidate := range candidates {
+		targets[candidate.TargetPath] = candidate
+	}
+
+	overrideTarget := filepath.Join("apps", "web", ".env.local")
+	override, ok := targets[overrideTarget]
+	if !ok {
+		t.Fatalf("missing override target %q in %#v", overrideTarget, candidates)
+	}
+	if override.ID != "web-env" {
+		t.Fatalf("expected config override, got %#v", override)
+	}
+
+	sharedTarget := filepath.Join("shared", ".env.web")
+	if _, ok := targets[sharedTarget]; !ok {
+		t.Fatalf("missing shared target %q in %#v", sharedTarget, candidates)
 	}
 }
 

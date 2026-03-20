@@ -43,29 +43,41 @@ func DetectEnvFiles(repoRoot string, cfg *config.File) ([]model.EnvCandidate, er
 	candidates := map[string]model.EnvCandidate{}
 	targetIndex := map[string]string{}
 
-	entries, err := os.ReadDir(repoRoot)
-	if err != nil {
-		return nil, err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	if err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		name := entry.Name()
+		if d.IsDir() {
+			if shouldSkipEnvDir(repoRoot, path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		name := d.Name()
 		if !looksLikeEnvFile(name) {
-			continue
+			return nil
 		}
-		path := filepath.Join(repoRoot, name)
-		id := sanitizeID("env", name)
+
+		relPath, err := filepath.Rel(repoRoot, path)
+		if err != nil {
+			return err
+		}
+		relPath = filepath.Clean(relPath)
+
+		id := sanitizeID("env", relPath)
 		candidates[id] = model.EnvCandidate{
 			ID:            id,
-			Label:         name,
+			Label:         relPath,
 			SourcePath:    path,
-			TargetPath:    name,
+			TargetPath:    relPath,
 			DefaultAction: model.ActionSymlink,
 			Source:        "detected",
 		}
-		targetIndex[name] = id
+		targetIndex[relPath] = id
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	if cfg != nil {
@@ -314,6 +326,19 @@ func looksLikeEnvFile(name string) bool {
 		return suffix != ""
 	}
 	return false
+}
+
+func shouldSkipEnvDir(repoRoot, path string) bool {
+	if filepath.Clean(path) == filepath.Clean(repoRoot) {
+		return false
+	}
+	name := filepath.Base(path)
+	switch name {
+	case ".git", "node_modules":
+		return true
+	default:
+		return false
+	}
 }
 
 func sanitizeID(prefix, value string) string {
