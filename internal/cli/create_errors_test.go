@@ -9,13 +9,6 @@ import (
 	"arbor/internal/model"
 )
 
-func TestFormatCreatePlanErrorSingleWorktreeMessage(t *testing.T) {
-	err := formatCreatePlanError(errors.New("exactly one worktree name is supported"))
-	if !strings.Contains(err.Error(), "can only create one worktree at a time") {
-		t.Fatalf("unexpected message: %s", err.Error())
-	}
-}
-
 func TestFormatCreatePlanErrorWrapsNotGitRepository(t *testing.T) {
 	err := formatCreatePlanError(gitutil.ErrNotGitRepository)
 	if !strings.Contains(err.Error(), "could not find a Git repository") {
@@ -60,6 +53,9 @@ func TestRenderExecutionSummaryBranchExists(t *testing.T) {
 	if !strings.Contains(got, `branch "feature-auth" already exists`) {
 		t.Fatalf("unexpected output: %s", got)
 	}
+	if !strings.Contains(got, "  branch: feature-auth") {
+		t.Fatalf("unexpected output: %s", got)
+	}
 }
 
 func TestRenderExecutionSummaryCommandFailure(t *testing.T) {
@@ -92,6 +88,9 @@ func TestRenderExecutionSummaryCommandFailure(t *testing.T) {
 	if !strings.Contains(got, `setup command "bun install" exited with status 1`) {
 		t.Fatalf("unexpected output: %s", got)
 	}
+	if !strings.Contains(got, "  branch: feature-auth") {
+		t.Fatalf("unexpected output: %s", got)
+	}
 }
 
 func TestRenderExecutionSummaryOpenFailure(t *testing.T) {
@@ -116,6 +115,9 @@ func TestRenderExecutionSummaryOpenFailure(t *testing.T) {
 	if !strings.Contains(got, "verify that the app executable exists") {
 		t.Fatalf("unexpected output: %s", got)
 	}
+	if !strings.Contains(got, "  branch: feature-auth") {
+		t.Fatalf("unexpected output: %s", got)
+	}
 }
 
 func TestRenderExecutionSummaryWarnings(t *testing.T) {
@@ -137,5 +139,8 @@ func TestRenderExecutionSummaryWarnings(t *testing.T) {
 	}
 	if !strings.Contains(got, `env_files[env]: source path ".env" not found`) {
 		t.Fatalf("expected warning in output: %s", got)
+	}
+	if !strings.Contains(got, "  branch: feature-auth") {
+		t.Fatalf("unexpected output: %s", got)
 	}
 }

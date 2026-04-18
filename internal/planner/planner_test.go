@@ -11,6 +11,144 @@ import (
 	"testing"
 )
 
+func TestNormalizeCreateNameKnownPrefix(t *testing.T) {
+	name, branch, err := normalizeCreateName("feat shr-123 new admin page")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "feat-shr-123-new-admin-page" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "feat/shr-123-new-admin-page" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
+func TestNormalizeCreateNameFeaturePrefix(t *testing.T) {
+	name, branch, err := normalizeCreateName("feature api v2")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "feature-api-v2" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "feature/api-v2" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
+func TestNormalizeCreateNameFixPrefix(t *testing.T) {
+	name, branch, err := normalizeCreateName("fix login bug")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "fix-login-bug" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "fix/login-bug" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
+func TestNormalizeCreateNameChorePrefix(t *testing.T) {
+	name, branch, err := normalizeCreateName("chore cleanup scripts")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "chore-cleanup-scripts" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "chore/cleanup-scripts" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
+func TestNormalizeCreateNameMixedPunctuation(t *testing.T) {
+	name, branch, err := normalizeCreateName("feat api: retry?")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "feat-api-retry" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "feat/api-retry" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
+func TestNormalizeCreateNamePreservesSafeSymbols(t *testing.T) {
+	name, branch, err := normalizeCreateName("docs c++ #1 & api")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "docs-c++-#1-&-api" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "docs-c++-#1-&-api" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
+func TestNormalizeCreateNameUnknownPrefix(t *testing.T) {
+	name, branch, err := normalizeCreateName("docs new page")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "docs-new-page" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "docs-new-page" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
+func TestNormalizeCreateNamePrefixWithoutRemainder(t *testing.T) {
+	name, branch, err := normalizeCreateName("feat")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "feat" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "feat" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
+func TestNormalizeCreateNameRejectsEmptyInput(t *testing.T) {
+	_, _, err := normalizeCreateName("   ")
+	if err == nil || !strings.Contains(err.Error(), "worktree name is required") {
+		t.Fatalf("expected missing name error, got %v", err)
+	}
+}
+
+func TestNormalizeCreateNameRejectsEmptyString(t *testing.T) {
+	_, _, err := normalizeCreateName("")
+	if err == nil || !strings.Contains(err.Error(), "worktree name is required") {
+		t.Fatalf("expected missing name error, got %v", err)
+	}
+}
+
+func TestNormalizeCreateNameRejectsPunctuationOnlyInput(t *testing.T) {
+	_, _, err := normalizeCreateName(".")
+	if err == nil || !strings.Contains(err.Error(), "worktree name is required") {
+		t.Fatalf("expected missing name error, got %v", err)
+	}
+}
+
+func TestNormalizeCreateNamePrefixOnlyWhenRemainderSanitizesEmpty(t *testing.T) {
+	name, branch, err := normalizeCreateName("feat .")
+	if err != nil {
+		t.Fatalf("normalizeCreateName returned error: %v", err)
+	}
+	if name != "feat" {
+		t.Fatalf("unexpected worktree name: %q", name)
+	}
+	if branch != "feat" {
+		t.Fatalf("unexpected branch: %q", branch)
+	}
+}
+
 func TestBuildCreatePlanSingleName(t *testing.T) {
 	root := initRepo(t)
 	writeFile(t, filepath.Join(root, ".env"), "A=1")
@@ -50,7 +188,7 @@ func TestBuildCreatePlanWithExistingBranchUsesBranchNameByDefault(t *testing.T) 
 	if err != nil {
 		t.Fatalf("BuildCreatePlan returned error: %v", err)
 	}
-	if got := plan.Worktrees[0].Name; got != "feature/auth" {
+	if got := plan.Worktrees[0].Name; got != "feature-auth" {
 		t.Fatalf("unexpected worktree name: %q", got)
 	}
 	if got := plan.Worktrees[0].Branch; got != "feature/auth" {
@@ -58,6 +196,10 @@ func TestBuildCreatePlanWithExistingBranchUsesBranchNameByDefault(t *testing.T) 
 	}
 	if got := plan.Worktrees[0].BranchMode; got != "existing" {
 		t.Fatalf("unexpected branch mode: %q", got)
+	}
+	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-feature-auth")
+	if got := plan.Worktrees[0].Path; got != wantPath {
+		t.Fatalf("unexpected worktree path: %q", got)
 	}
 }
 
@@ -79,6 +221,30 @@ func TestBuildCreatePlanWithExistingBranchAllowsCustomWorktreeName(t *testing.T)
 	}
 	if got := plan.Worktrees[0].Branch; got != "feature/auth" {
 		t.Fatalf("unexpected branch: %q", got)
+	}
+}
+
+func TestBuildCreatePlanWithExistingBranchDerivesSafeNameForPathOnly(t *testing.T) {
+	root := initRepo(t)
+	runGit(t, root, "branch", "feature/api.v2_auth", "main")
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Branch:         "feature/api.v2_auth",
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Branch; got != "feature/api.v2_auth" {
+		t.Fatalf("unexpected branch: %q", got)
+	}
+	if got := plan.Worktrees[0].Name; got != "feature-api-v2-auth" {
+		t.Fatalf("unexpected derived worktree name: %q", got)
+	}
+	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-feature-api-v2-auth")
+	if got := plan.Worktrees[0].Path; got != wantPath {
+		t.Fatalf("unexpected worktree path: %q", got)
 	}
 }
 
@@ -107,6 +273,31 @@ func TestBuildCreatePlanRejectsBranchFlagWithBranchTemplate(t *testing.T) {
 	}, bytes.NewBuffer(nil), ".arbor.yaml")
 	if err == nil || !strings.Contains(err.Error(), "--branch cannot be used with --branch-template") {
 		t.Fatalf("expected branch/template conflict, got %v", err)
+	}
+}
+
+func TestBuildCreatePlanBranchTemplateUsesNormalizedNameButKeepsTemplateControl(t *testing.T) {
+	root := initRepo(t)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Names:          []string{"Feat", "API", "Retry"},
+		BranchTemplate: "release/{{ .Name }}--{{ .Repo }}",
+		PathTemplate:   "../{{ .Branch }}",
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Name; got != "feat-api-retry" {
+		t.Fatalf("unexpected worktree name: %q", got)
+	}
+	if got := plan.Worktrees[0].Branch; got != "release/feat-api-retry--"+filepath.Base(root) {
+		t.Fatalf("unexpected branch: %q", got)
+	}
+	wantPath := filepath.Join(filepath.Dir(root), "release", "feat-api-retry--"+filepath.Base(root))
+	if got := plan.Worktrees[0].Path; got != wantPath {
+		t.Fatalf("unexpected worktree path: %q", got)
 	}
 }
 
@@ -140,25 +331,60 @@ func TestBuildCreatePlanRejectsExistingBranchAlreadyInWorktree(t *testing.T) {
 	}
 }
 
-func TestBuildCreatePlanRejectsMultipleNames(t *testing.T) {
+func TestBuildCreatePlanJoinsMultipleNamesAndNormalizes(t *testing.T) {
 	root := initRepo(t)
-	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
-defaults:
-  base_ref: main
-  open_app: cursor
-  worktree_template: ../{{ .Repo }}-{{ .Name }}
-presets:
-  fast:
-    auto_run: false
-`)
 
-	_, err := BuildCreatePlan(context.Background(), Inputs{
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
 		CWD:            root,
-		Names:          []string{"api", "web"},
+		Names:          []string{"feat", "shr-123", "new", "admin", "page"},
 		NonInteractive: true,
 	}, bytes.NewBuffer(nil), ".arbor.yaml")
-	if err == nil || !strings.Contains(err.Error(), "exactly one worktree name is supported") {
-		t.Fatalf("expected single-worktree error, got %v", err)
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Name; got != "feat-shr-123-new-admin-page" {
+		t.Fatalf("unexpected worktree name: %q", got)
+	}
+	if got := plan.Worktrees[0].Branch; got != "feat/shr-123-new-admin-page" {
+		t.Fatalf("unexpected branch: %q", got)
+	}
+}
+
+func TestBuildCreatePlanJoinsDuplicatePositionalTokens(t *testing.T) {
+	root := initRepo(t)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Names:          []string{"feat", "feat", "auth"},
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Name; got != "feat-feat-auth" {
+		t.Fatalf("unexpected worktree name: %q", got)
+	}
+	if got := plan.Worktrees[0].Branch; got != "feat/feat-auth" {
+		t.Fatalf("unexpected branch: %q", got)
+	}
+}
+
+func TestBuildCreatePlanUnknownPrefixUsesPlainSlug(t *testing.T) {
+	root := initRepo(t)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Names:          []string{"admin", "redesign"},
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Name; got != "admin-redesign" {
+		t.Fatalf("unexpected worktree name: %q", got)
+	}
+	if got := plan.Worktrees[0].Branch; got != "admin-redesign" {
+		t.Fatalf("unexpected branch: %q", got)
 	}
 }
 
@@ -253,23 +479,23 @@ func TestBuildCreatePlanInteractivePromptsUpdateCarriedEnvDefault(t *testing.T) 
 	}
 }
 
-func TestBuildCreatePlanInteractivePrefixPromptUsesSelectedPrefixWithoutConfig(t *testing.T) {
+func TestBuildCreatePlanInteractivePrefixPromptUsesKnownPrefixWithoutConfig(t *testing.T) {
 	root := initRepo(t)
 
-	input := bytes.NewBufferString("auth\n1\n")
+	input := bytes.NewBufferString("new admin page\n2\n")
 	plan, err := BuildCreatePlan(context.Background(), Inputs{
 		CWD: root,
 	}, input, ".arbor.yaml")
 	if err != nil {
 		t.Fatalf("BuildCreatePlan returned error: %v", err)
 	}
-	if plan.Worktrees[0].Name != "auth" {
+	if plan.Worktrees[0].Name != "feature-new-admin-page" {
 		t.Fatalf("unexpected worktree name: %#v", plan.Worktrees[0])
 	}
-	if plan.Worktrees[0].Branch != "feat/auth" {
+	if plan.Worktrees[0].Branch != "feature/new-admin-page" {
 		t.Fatalf("unexpected branch: %#v", plan.Worktrees[0])
 	}
-	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-feat-auth")
+	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-feature-new-admin-page")
 	if plan.Worktrees[0].Path != wantPath {
 		t.Fatalf("unexpected path: %q", plan.Worktrees[0].Path)
 	}
@@ -278,17 +504,42 @@ func TestBuildCreatePlanInteractivePrefixPromptUsesSelectedPrefixWithoutConfig(t
 func TestBuildCreatePlanInteractivePrefixPromptSupportsCustomPrefix(t *testing.T) {
 	root := initRepo(t)
 
-	input := bytes.NewBufferString("auth\n4\nbugfix\n")
+	input := bytes.NewBufferString("new admin page\n5\nbug fix\n")
 	plan, err := BuildCreatePlan(context.Background(), Inputs{
 		CWD: root,
 	}, input, ".arbor.yaml")
 	if err != nil {
 		t.Fatalf("BuildCreatePlan returned error: %v", err)
 	}
-	if plan.Worktrees[0].Branch != "bugfix/auth" {
+	if plan.Worktrees[0].Name != "bug-fix-new-admin-page" {
+		t.Fatalf("unexpected worktree name: %#v", plan.Worktrees[0])
+	}
+	if plan.Worktrees[0].Branch != "bug-fix/new-admin-page" {
 		t.Fatalf("unexpected branch: %#v", plan.Worktrees[0])
 	}
-	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-bugfix-auth")
+	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-bug-fix-new-admin-page")
+	if plan.Worktrees[0].Path != wantPath {
+		t.Fatalf("unexpected path: %q", plan.Worktrees[0].Path)
+	}
+}
+
+func TestBuildCreatePlanInteractivePrefixPromptRejectsInvalidCustomPrefixInTextMode(t *testing.T) {
+	root := initRepo(t)
+
+	input := bytes.NewBufferString("new admin page\n5\n!!!\nbug fix\n")
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD: root,
+	}, input, ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if plan.Worktrees[0].Name != "bug-fix-new-admin-page" {
+		t.Fatalf("unexpected worktree name: %#v", plan.Worktrees[0])
+	}
+	if plan.Worktrees[0].Branch != "bug-fix/new-admin-page" {
+		t.Fatalf("unexpected branch: %#v", plan.Worktrees[0])
+	}
+	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-bug-fix-new-admin-page")
 	if plan.Worktrees[0].Path != wantPath {
 		t.Fatalf("unexpected path: %q", plan.Worktrees[0].Path)
 	}
@@ -297,17 +548,42 @@ func TestBuildCreatePlanInteractivePrefixPromptSupportsCustomPrefix(t *testing.T
 func TestBuildCreatePlanInteractivePrefixPromptSupportsEmptyPrefix(t *testing.T) {
 	root := initRepo(t)
 
-	input := bytes.NewBufferString("auth\n5\n")
+	input := bytes.NewBufferString("new admin page\n6\n")
 	plan, err := BuildCreatePlan(context.Background(), Inputs{
 		CWD: root,
 	}, input, ".arbor.yaml")
 	if err != nil {
 		t.Fatalf("BuildCreatePlan returned error: %v", err)
 	}
-	if plan.Worktrees[0].Branch != "auth" {
+	if plan.Worktrees[0].Name != "new-admin-page" {
+		t.Fatalf("unexpected worktree name: %#v", plan.Worktrees[0])
+	}
+	if plan.Worktrees[0].Branch != "new-admin-page" {
 		t.Fatalf("unexpected branch: %#v", plan.Worktrees[0])
 	}
-	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-auth")
+	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-new-admin-page")
+	if plan.Worktrees[0].Path != wantPath {
+		t.Fatalf("unexpected path: %q", plan.Worktrees[0].Path)
+	}
+}
+
+func TestBuildCreatePlanInteractiveEmptyPrefixUsesCliNormalization(t *testing.T) {
+	root := initRepo(t)
+
+	input := bytes.NewBufferString("feat new admin page\n6\n")
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD: root,
+	}, input, ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if plan.Worktrees[0].Name != "feat-new-admin-page" {
+		t.Fatalf("unexpected worktree name: %#v", plan.Worktrees[0])
+	}
+	if plan.Worktrees[0].Branch != "feat/new-admin-page" {
+		t.Fatalf("unexpected branch: %#v", plan.Worktrees[0])
+	}
+	wantPath := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-feat-new-admin-page")
 	if plan.Worktrees[0].Path != wantPath {
 		t.Fatalf("unexpected path: %q", plan.Worktrees[0].Path)
 	}
@@ -317,14 +593,36 @@ func TestBuildCreatePlanInteractivePrefixPromptStillRunsWhenConfigExists(t *test
 	root := initRepo(t)
 	writeFile(t, filepath.Join(root, ".arbor.yaml"), "templates:\n  branch: release/{{ .Name }}\n")
 
-	input := bytes.NewBufferString("auth\n2\n")
+	input := bytes.NewBufferString("new admin page\n3\n")
 	plan, err := BuildCreatePlan(context.Background(), Inputs{
 		CWD: root,
 	}, input, ".arbor.yaml")
 	if err != nil {
 		t.Fatalf("BuildCreatePlan returned error: %v", err)
 	}
-	if plan.Worktrees[0].Branch != "fix/auth" {
+	if plan.Worktrees[0].Name != "fix-new-admin-page" {
+		t.Fatalf("unexpected worktree name: %#v", plan.Worktrees[0])
+	}
+	if plan.Worktrees[0].Branch != "release/fix-new-admin-page" {
+		t.Fatalf("unexpected branch: %#v", plan.Worktrees[0])
+	}
+}
+
+func TestBuildCreatePlanInteractiveBranchTemplateSkipsPrefixPrompt(t *testing.T) {
+	root := initRepo(t)
+
+	input := bytes.NewBufferString("New API & worker\n")
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		BranchTemplate: "release/{{ .Name }}",
+	}, input, ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if plan.Worktrees[0].Name != "new-api-&-worker" {
+		t.Fatalf("unexpected worktree name: %#v", plan.Worktrees[0])
+	}
+	if plan.Worktrees[0].Branch != "release/new-api-&-worker" {
 		t.Fatalf("unexpected branch: %#v", plan.Worktrees[0])
 	}
 }
@@ -349,7 +647,7 @@ func TestPromptBranchPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptBranchPrefix returned error: %v", err)
 	}
-	if got != "fix" {
+	if got != "feature" {
 		t.Fatalf("unexpected prefix: %q", got)
 	}
 }

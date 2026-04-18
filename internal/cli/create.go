@@ -22,8 +22,10 @@ func newCreateCommand(opts *Options) *cobra.Command {
 	var planOnly bool
 
 	cmd := &cobra.Command{
-		Use:   "create [name...]",
+		Use:   "create [description...]",
 		Short: "Create worktrees and run setup actions.",
+		Long: "Create worktrees and run setup actions.\n\n" +
+			"All arguments after `create` are joined into one worktree description.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {

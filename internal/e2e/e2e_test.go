@@ -125,17 +125,23 @@ presets:
 	}
 }
 
-func TestCreateRejectsMultipleNamesEndToEnd(t *testing.T) {
+func TestCreateJoinsMultipleNamesEndToEnd(t *testing.T) {
 	root := copyFixtureRepo(t, "config")
 	initGitRepo(t, root)
 
-	_, err := planner.BuildCreatePlan(context.Background(), planner.Inputs{
+	plan, err := planner.BuildCreatePlan(context.Background(), planner.Inputs{
 		CWD:            root,
-		Names:          []string{"api", "web"},
+		Names:          []string{"feat", "api", "web"},
 		NonInteractive: true,
 	}, bytes.NewBuffer(nil), ".arbor.yaml")
-	if err == nil || err.Error() != "exactly one worktree name is supported" {
-		t.Fatalf("expected single-worktree error, got %v", err)
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Name; got != "feat-api-web" {
+		t.Fatalf("unexpected worktree name: %q", got)
+	}
+	if got := plan.Worktrees[0].Branch; got != "feat/api-web" {
+		t.Fatalf("unexpected branch: %q", got)
 	}
 }
 

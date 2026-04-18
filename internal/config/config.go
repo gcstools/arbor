@@ -153,7 +153,7 @@ func StarterConfig() *File {
 			},
 		},
 		Templates: Templates{
-			Branch:   "feature/{{ .Name }}",
+			Branch:   "{{ .Name }}",
 			Worktree: "../{{ .Repo }}-{{ .Name }}",
 		},
 	}

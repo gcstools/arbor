@@ -435,7 +435,7 @@ Example:
 
 ```yaml
 templates:
-  branch: feature/{{ .Name }}
+  branch: {{ .Name }}
   worktree: ../{{ .Repo }}-{{ .Name }}
 ```
 

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	"arbor/internal/config"
 	"arbor/internal/detect"
@@ -38,6 +39,11 @@ type CreatePlan struct {
 	Warnings  []string
 }
 
+type nameResolution struct {
+	Name   string
+	Branch string
+}
+
 func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath string) (CreatePlan, error) {
 	if in == nil {
 		in = os.Stdin
@@ -59,7 +65,7 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 		return CreatePlan{}, err
 	}
 
-	names, presetName, promptBranchTemplate, promptPathTemplate, err := resolveNamesAndPreset(input, cfg, in, reader)
+	resolvedName, presetName, promptBranchTemplate, promptPathTemplate, err := resolveNamesAndPreset(input, cfg, in, reader)
 	if err != nil {
 		return CreatePlan{}, err
 	}
@@ -72,22 +78,21 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 	openApp := firstNonEmpty(input.OpenApp, cfg.Defaults.OpenApp)
 	branchTemplate := firstNonEmpty(input.BranchTemplate, promptBranchTemplate, cfg.Templates.Branch)
 	pathTemplate := firstNonEmpty(input.PathTemplate, promptPathTemplate, cfg.Defaults.WorktreeTemplate, cfg.Templates.Worktree)
-
-	if branchTemplate == "" {
-		branchTemplate = "{{ .Name }}"
-	}
 	if pathTemplate == "" {
 		pathTemplate = filepath.Join("..", "{{ .Repo }}-{{ .Name }}")
 	}
 
 	repoName := filepath.Base(repoState.Root)
-	name := names[0]
+	name := resolvedName.Name
 	branchMode := model.BranchModeCreate
 	branch := strings.TrimSpace(input.Branch)
 	if branch != "" {
 		branchMode = model.BranchModeExisting
-		if name == "" {
-			name = branch
+		if len(trimNonEmpty(input.Names)) == 0 {
+			name = sanitizePathPrefix(branch)
+			if name == "" {
+				name = branch
+			}
 		}
 		if !branchExists(repoState, branch) {
 			return CreatePlan{}, fmt.Errorf("branch does not exist %q", branch)
@@ -96,14 +101,17 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 			return CreatePlan{}, fmt.Errorf("branch already has a worktree %q at %q", branch, existingPath)
 		}
 	} else {
-		branch, err = config.RenderTemplate(branchTemplate, config.TemplateData{
-			Name:  name,
-			Index: 1,
-			Base:  baseRef,
-			Repo:  repoName,
-		})
-		if err != nil {
-			return CreatePlan{}, fmt.Errorf("branch template for %q: %w", name, err)
+		branch = resolvedName.Branch
+		if branchTemplate != "" {
+			branch, err = config.RenderTemplate(branchTemplate, config.TemplateData{
+				Name:  name,
+				Index: 1,
+				Base:  baseRef,
+				Repo:  repoName,
+			})
+			if err != nil {
+				return CreatePlan{}, fmt.Errorf("branch template for %q: %w", name, err)
+			}
 		}
 	}
 	pathValue, err := config.RenderTemplate(pathTemplate, config.TemplateData{
@@ -198,49 +206,65 @@ func summarizeBaseRef(plan CreatePlan) string {
 	return baseRef
 }
 
-func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader *bufio.Reader) ([]string, string, string, string, error) {
-	names := dedupeNonEmpty(input.Names)
-	promptBranchTemplate := ""
-	promptPathTemplate := ""
-	if len(names) > 1 {
-		return nil, "", "", "", fmt.Errorf("exactly one worktree name is supported")
-	}
-	if len(names) == 0 {
+func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader *bufio.Reader) (nameResolution, string, string, string, error) {
+	parts := trimNonEmpty(input.Names)
+	if len(parts) == 0 {
 		if input.Branch != "" {
-			names = []string{strings.TrimSpace(input.Branch)}
+			parts = []string{strings.TrimSpace(input.Branch)}
 		}
 	}
-	if len(names) == 0 {
+	if len(parts) == 0 {
 		if input.NonInteractive {
-			return nil, "", "", "", fmt.Errorf("worktree name is required in non-interactive mode")
+			return nameResolution{}, "", "", "", fmt.Errorf("worktree name is required in non-interactive mode")
 		}
 		name, err := promptValue(reader, "worktree name")
 		if err != nil {
-			return nil, "", "", "", err
+			return nameResolution{}, "", "", "", err
 		}
 		if name == "" {
-			return nil, "", "", "", fmt.Errorf("worktree name is required")
+			return nameResolution{}, "", "", "", fmt.Errorf("worktree name is required")
 		}
-		if input.BranchTemplate == "" {
-			prefix, err := promptBranchPrefix(in, reader)
+		if strings.TrimSpace(input.BranchTemplate) != "" {
+			normalizedName, normalizedBranch, err := normalizeCreateName(name)
 			if err != nil {
-				return nil, "", "", "", err
+				return nameResolution{}, "", "", "", err
 			}
-			if prefix != "" {
-				promptBranchTemplate = prefix + "/{{ .Name }}"
-				promptPathTemplate = filepath.Join("..", "{{ .Repo }}-"+sanitizePathPrefix(prefix)+"-{{ .Name }}")
+			if input.Preset != "" && cfg != nil {
+				if _, err := cfg.ResolvePreset(input.Preset); err != nil {
+					return nameResolution{}, "", "", "", err
+				}
+			}
+			return nameResolution{Name: normalizedName, Branch: normalizedBranch}, input.Preset, "", "", nil
+		}
+		prefix, err := promptBranchPrefix(in, reader)
+		if err != nil {
+			return nameResolution{}, "", "", "", err
+		}
+		resolved, err := normalizeInteractiveCreateName(name, prefix)
+		if err != nil {
+			return nameResolution{}, "", "", "", err
+		}
+		if input.Preset != "" && cfg != nil {
+			if _, err := cfg.ResolvePreset(input.Preset); err != nil {
+				return nameResolution{}, "", "", "", err
 			}
 		}
-		names = []string{name}
+		return resolved, input.Preset, "", "", nil
+	}
+
+	rawName := strings.Join(parts, " ")
+	name, branch, err := normalizeCreateName(rawName)
+	if err != nil {
+		return nameResolution{}, "", "", "", err
 	}
 
 	if input.Preset != "" && cfg != nil {
 		if _, err := cfg.ResolvePreset(input.Preset); err != nil {
-			return nil, "", "", "", err
+			return nameResolution{}, "", "", "", err
 		}
 	}
 
-	return names, input.Preset, promptBranchTemplate, promptPathTemplate, nil
+	return nameResolution{Name: name, Branch: branch}, input.Preset, "", "", nil
 }
 
 func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
@@ -251,12 +275,13 @@ func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
 	for {
 		fmt.Println("branch prefix:")
 		fmt.Println("  1) feat")
-		fmt.Println("  2) fix")
-		fmt.Println("  3) chore")
-		fmt.Println("  4) custom")
-		fmt.Println("  5) empty")
+		fmt.Println("  2) feature")
+		fmt.Println("  3) fix")
+		fmt.Println("  4) chore")
+		fmt.Println("  5) custom")
+		fmt.Println("  6) empty")
 
-		choice, err := promptValue(reader, "select prefix [1-5]")
+		choice, err := promptValue(reader, "select prefix [1-6]")
 		if err != nil {
 			return "", err
 		}
@@ -264,17 +289,25 @@ func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
 		switch strings.ToLower(strings.TrimSpace(choice)) {
 		case "1", "feat":
 			return "feat", nil
-		case "2", "fix":
+		case "2", "feature":
+			return "feature", nil
+		case "3", "fix":
 			return "fix", nil
-		case "3", "chore":
+		case "4", "chore":
 			return "chore", nil
-		case "4", "custom":
-			value, err := promptValue(reader, "custom prefix")
-			if err != nil {
-				return "", err
+		case "5", "custom":
+			for {
+				value, err := promptValue(reader, "custom prefix")
+				if err != nil {
+					return "", err
+				}
+				value = sanitizePathPrefix(value)
+				if value != "" {
+					return value, nil
+				}
+				fmt.Println("custom prefix must contain at least one letter or number")
 			}
-			return strings.Trim(value, "/ "), nil
-		case "5", "empty", "":
+		case "6", "empty", "":
 			return "", nil
 		default:
 			fmt.Println("invalid prefix choice")
@@ -283,7 +316,7 @@ func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
 }
 
 func promptBranchPrefixSelect(in io.Reader) (string, error) {
-	options := []string{"feat", "fix", "chore", "custom", "empty"}
+	options := []string{"feat", "feature", "fix", "chore", "custom", "empty"}
 	selectPrompt := promptui.Select{
 		Label:     "Branch prefix",
 		Items:     options,
@@ -298,14 +331,14 @@ func promptBranchPrefixSelect(in io.Reader) (string, error) {
 	}
 
 	switch choice {
-	case "feat", "fix", "chore":
+	case "feat", "feature", "fix", "chore":
 		return choice, nil
 	case "custom":
 		prompt := promptui.Prompt{
 			Label: "custom prefix",
 			Stdin: io.NopCloser(in),
 			Validate: func(value string) error {
-				if strings.Trim(value, "/ ") == "" {
+				if sanitizePathPrefix(value) == "" {
 					return fmt.Errorf("enter a prefix or choose empty")
 				}
 				return nil
@@ -315,7 +348,7 @@ func promptBranchPrefixSelect(in io.Reader) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return strings.Trim(value, "/ "), nil
+		return sanitizePathPrefix(value), nil
 	default:
 		return "", nil
 	}
@@ -340,9 +373,79 @@ func supportsInteractiveSelect(in io.Reader) bool {
 
 func sanitizePathPrefix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "-", "_", "-", ".", "-")
-	value = replacer.Replace(value)
-	return strings.Trim(value, "-")
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			b.WriteRune(r)
+			lastDash = false
+		case strings.ContainsRune("+#&", r):
+			b.WriteRune(r)
+			lastDash = false
+		case unicode.IsSpace(r), strings.ContainsRune("/._-", r):
+			if b.Len() > 0 && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		default:
+			continue
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func normalizeCreateName(raw string) (string, string, error) {
+	tokens := strings.Fields(strings.TrimSpace(raw))
+	if len(tokens) == 0 {
+		return "", "", fmt.Errorf("worktree name is required")
+	}
+
+	name := sanitizePathPrefix(strings.Join(tokens, " "))
+	if name == "" {
+		return "", "", fmt.Errorf("worktree name is required")
+	}
+	if len(tokens) > 1 {
+		switch strings.ToLower(tokens[0]) {
+		case "feat", "feature", "fix", "chore":
+			remainder := sanitizePathPrefix(strings.Join(tokens[1:], " "))
+			if remainder == "" {
+				prefix := strings.ToLower(tokens[0])
+				return prefix, prefix, nil
+			}
+			branch := strings.ToLower(tokens[0]) + "/" + remainder
+			return name, branch, nil
+		}
+	}
+
+	return name, name, nil
+}
+
+func normalizeInteractiveCreateName(rawName, prefix string) (nameResolution, error) {
+	prefix = sanitizePathPrefix(prefix)
+	switch prefix {
+	case "":
+		name, branch, err := normalizeCreateName(rawName)
+		if err != nil {
+			return nameResolution{}, err
+		}
+		return nameResolution{Name: name, Branch: branch}, nil
+	case "feat", "feature", "fix", "chore":
+		name, branch, err := normalizeCreateName(prefix + " " + rawName)
+		if err != nil {
+			return nameResolution{}, err
+		}
+		return nameResolution{Name: name, Branch: branch}, nil
+	default:
+		name := sanitizePathPrefix(rawName)
+		if name == "" {
+			return nameResolution{}, fmt.Errorf("worktree name is required")
+		}
+		return nameResolution{
+			Name:   prefix + "-" + name,
+			Branch: prefix + "/" + name,
+		}, nil
+	}
 }
 
 func buildDefaultEnvPlans(candidates []model.EnvCandidate, cfg *config.File, presetName string) []model.EnvPlan {
@@ -532,6 +635,18 @@ func dedupeNonEmpty(values []string) []string {
 			continue
 		}
 		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func trimNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
 		out = append(out, value)
 	}
 	return out
