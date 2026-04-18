@@ -15,6 +15,12 @@ import (
 
 const DefaultConfigPath = ".arbor.yaml"
 
+var defaultConfigFallbackNames = []string{
+	".arbor.yml",
+	"arbor.yaml",
+	"arbor.yml",
+}
+
 type File struct {
 	Path      string
 	Defaults  Defaults                 `yaml:"defaults"`
@@ -83,11 +89,30 @@ func LoadOptional(path string) (*File, error) {
 		return cfg, nil
 	}
 	if errors.Is(err, os.ErrNotExist) {
+		if fallback := resolveFallbackPath(path); fallback != "" {
+			return Load(fallback)
+		}
 		empty := &File{Path: ""}
 		empty.applyDefaults()
 		return empty, nil
 	}
 	return nil, err
+}
+
+func resolveFallbackPath(path string) string {
+	if filepath.Base(path) != DefaultConfigPath {
+		return ""
+	}
+
+	dir := filepath.Dir(path)
+	for _, name := range defaultConfigFallbackNames {
+		candidate := filepath.Join(dir, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	return ""
 }
 
 func (f *File) MarshalYAML() ([]byte, error) {

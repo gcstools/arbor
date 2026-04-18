@@ -269,6 +269,50 @@ func TestCreateCommandPlanningOutputWithExistingBranch(t *testing.T) {
 	}
 }
 
+func TestCreateCommandPlanningOutputUsesConfigDefaultsWithoutInteractiveAnswers(t *testing.T) {
+	root := initRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".arbor.yaml"), []byte(`
+env_files:
+  - id: env
+    label: Primary env
+    source_path: .env
+    target_path: .env
+    default_action: copy
+commands:
+  - id: install
+    label: Install deps
+    command: pnpm install
+presets:
+  default:
+    commands: [install]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("A=1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	runInDir(t, root, func() {
+		if err := Execute([]string{"create", "feature-auth", "--plan"}, IOStreams{
+			In:     bytes.NewBufferString(""),
+			Out:    &out,
+			ErrOut: &errOut,
+		}); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	})
+
+	got := out.String()
+	if !strings.Contains(got, "env actions: .env=copy") {
+		t.Fatalf("expected config-driven env action in output: %s", got)
+	}
+	if !strings.Contains(got, "commands: Install deps=run") {
+		t.Fatalf("expected config-driven command approval in output: %s", got)
+	}
+}
+
 func TestCreateCommandExecutes(t *testing.T) {
 	root := initRepo(t)
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("A=1"), 0o644); err != nil {

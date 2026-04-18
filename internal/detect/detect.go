@@ -21,14 +21,15 @@ type Result struct {
 }
 
 func Scan(repoRoot string, cfg *config.File) (Result, error) {
-	envFiles, err := DetectEnvFiles(repoRoot, cfg)
+	envFiles, envWarnings, err := DetectEnvFiles(repoRoot, cfg)
 	if err != nil {
 		return Result{}, err
 	}
-	commands, warnings, err := DetectCommands(repoRoot, cfg)
+	commands, commandWarnings, err := DetectCommands(repoRoot, cfg)
 	if err != nil {
 		return Result{}, err
 	}
+	warnings := append(envWarnings, commandWarnings...)
 
 	return Result{
 		RepoRoot:  repoRoot,
@@ -39,9 +40,10 @@ func Scan(repoRoot string, cfg *config.File) (Result, error) {
 	}, nil
 }
 
-func DetectEnvFiles(repoRoot string, cfg *config.File) ([]model.EnvCandidate, error) {
+func DetectEnvFiles(repoRoot string, cfg *config.File) ([]model.EnvCandidate, []string, error) {
 	candidates := map[string]model.EnvCandidate{}
 	targetIndex := map[string]string{}
+	var warnings []string
 
 	if err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -77,7 +79,7 @@ func DetectEnvFiles(repoRoot string, cfg *config.File) ([]model.EnvCandidate, er
 		targetIndex[relPath] = id
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if cfg != nil {
@@ -87,7 +89,12 @@ func DetectEnvFiles(repoRoot string, cfg *config.File) ([]model.EnvCandidate, er
 				sourcePath = filepath.Join(repoRoot, sourcePath)
 			}
 			info, err := os.Stat(sourcePath)
-			if err != nil || info.IsDir() {
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("env_files[%s]: source path %q not found", rule.ID, rule.SourcePath))
+				continue
+			}
+			if info.IsDir() {
+				warnings = append(warnings, fmt.Sprintf("env_files[%s]: source path %q is directory", rule.ID, rule.SourcePath))
 				continue
 			}
 
@@ -110,11 +117,11 @@ func DetectEnvFiles(repoRoot string, cfg *config.File) ([]model.EnvCandidate, er
 		}
 	}
 
-	return sortEnvCandidates(candidates), nil
+	return sortEnvCandidates(candidates), warnings, nil
 }
 
 func DetectCommands(repoRoot string, cfg *config.File) ([]model.CommandCandidate, []string, error) {
-	commands := map[string]model.CommandCandidate{}
+	collector := newCommandCollector()
 	var warnings []string
 
 	pkgJSONPath := filepath.Join(repoRoot, "package.json")
@@ -124,7 +131,7 @@ func DetectCommands(repoRoot string, cfg *config.File) ([]model.CommandCandidate
 			warnings = append(warnings, fmt.Sprintf("package.json: %v", err))
 		} else {
 			for _, cmd := range pkgCommands {
-				commands[cmd.ID] = cmd
+				collector.Add(cmd)
 			}
 		}
 		if warn != "" {
@@ -136,7 +143,7 @@ func DetectCommands(repoRoot string, cfg *config.File) ([]model.CommandCandidate
 		makePath := filepath.Join(repoRoot, name)
 		if data, err := os.ReadFile(makePath); err == nil {
 			for _, cmd := range detectMakeTargets(string(data)) {
-				commands[cmd.ID] = cmd
+				collector.Add(cmd)
 			}
 			break
 		}
@@ -146,7 +153,7 @@ func DetectCommands(repoRoot string, cfg *config.File) ([]model.CommandCandidate
 		justPath := filepath.Join(repoRoot, name)
 		if data, err := os.ReadFile(justPath); err == nil {
 			for _, cmd := range detectJustTargets(string(data)) {
-				commands[cmd.ID] = cmd
+				collector.Add(cmd)
 			}
 			break
 		}
@@ -158,11 +165,38 @@ func DetectCommands(repoRoot string, cfg *config.File) ([]model.CommandCandidate
 			if merged.Source == "" {
 				merged.Source = "config"
 			}
-			commands[merged.ID] = merged
+			collector.Add(merged)
 		}
 	}
 
-	return sortCommandCandidates(commands), warnings, nil
+	return collector.List(), warnings, nil
+}
+
+type commandCollector struct {
+	order []string
+	items map[string]model.CommandCandidate
+}
+
+func newCommandCollector() *commandCollector {
+	return &commandCollector{
+		order: make([]string, 0),
+		items: make(map[string]model.CommandCandidate),
+	}
+}
+
+func (c *commandCollector) Add(candidate model.CommandCandidate) {
+	if _, exists := c.items[candidate.ID]; !exists {
+		c.order = append(c.order, candidate.ID)
+	}
+	c.items[candidate.ID] = candidate
+}
+
+func (c *commandCollector) List() []model.CommandCandidate {
+	out := make([]model.CommandCandidate, 0, len(c.order))
+	for _, id := range c.order {
+		out = append(out, c.items[id])
+	}
+	return out
 }
 
 type packageJSON struct {
@@ -379,23 +413,6 @@ func sortEnvCandidates(in map[string]model.EnvCandidate) []model.EnvCandidate {
 		out = append(out, candidate)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].ID < out[j].ID
-	})
-	return out
-}
-
-func sortCommandCandidates(in map[string]model.CommandCandidate) []model.CommandCandidate {
-	out := make([]model.CommandCandidate, 0, len(in))
-	for _, candidate := range in {
-		out = append(out, candidate)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].ID == "node-install" && out[j].ID == "node-build" {
-			return true
-		}
-		if out[i].ID == "node-build" && out[j].ID == "node-install" {
-			return false
-		}
 		return out[i].ID < out[j].ID
 	})
 	return out

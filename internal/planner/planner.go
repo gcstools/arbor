@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"arbor/internal/config"
@@ -65,6 +66,8 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 	if err := validateBranchInputs(input); err != nil {
 		return CreatePlan{}, err
 	}
+	effectivePresetName := resolveEffectivePresetName(presetName, cfg)
+
 	baseRef := firstNonEmpty(input.BaseRef, cfg.Defaults.BaseRef, repoState.CurrentRef, repoState.CurrentCommit)
 	openApp := firstNonEmpty(input.OpenApp, cfg.Defaults.OpenApp)
 	branchTemplate := firstNonEmpty(input.BranchTemplate, promptBranchTemplate, cfg.Templates.Branch)
@@ -130,13 +133,13 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 		BranchMode: branchMode,
 		BaseRef:    baseRef,
 		Path:       path,
-		Preset:     presetName,
-		EnvActions: buildDefaultEnvPlans(result.EnvFiles, cfg, presetName),
-		Commands:   buildDefaultCommandPlans(result.Commands, cfg, presetName),
+		Preset:     effectivePresetName,
+		EnvActions: buildDefaultEnvPlans(result.EnvFiles, cfg, effectivePresetName),
+		Commands:   buildDefaultCommandPlans(result.Commands, cfg, effectivePresetName),
 	}
 
 	if !input.NonInteractive {
-		if err := promptForSelections(reader, &worktree, cfg, presetName); err != nil {
+		if err := promptForSelections(reader, &worktree, cfg, effectivePresetName); err != nil {
 			return CreatePlan{}, err
 		}
 	}
@@ -152,12 +155,13 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 func RenderSummary(plan CreatePlan) string {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("repo: %s", plan.RepoState.Root))
-	lines = append(lines, fmt.Sprintf("base ref: %s", firstNonEmpty(plan.RepoState.CurrentRef, plan.RepoState.CurrentCommit)))
+	lines = append(lines, fmt.Sprintf("base ref: %s", summarizeBaseRef(plan)))
 	lines = append(lines, fmt.Sprintf("open app: %s", firstNonEmpty(plan.OpenApp, "disabled")))
 	for _, worktree := range plan.Worktrees {
 		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("worktree %s", worktree.Name))
 		lines = append(lines, fmt.Sprintf("  branch: %s", worktree.Branch))
+		lines = append(lines, fmt.Sprintf("  preset: %s", worktree.Preset))
 		lines = append(lines, fmt.Sprintf("  branch mode: %s", worktree.BranchMode))
 		lines = append(lines, fmt.Sprintf("  path: %s", worktree.Path))
 		lines = append(lines, fmt.Sprintf("  env actions: %s", summarizeEnvActions(worktree.EnvActions)))
@@ -173,6 +177,25 @@ func RenderSummary(plan CreatePlan) string {
 	lines = append(lines, "")
 	lines = append(lines, "planning only; execution not implemented yet")
 	return strings.Join(lines, "\n")
+}
+
+func summarizeBaseRef(plan CreatePlan) string {
+	if len(plan.Worktrees) == 0 {
+		return firstNonEmpty(plan.RepoState.CurrentRef, plan.RepoState.CurrentCommit)
+	}
+
+	baseRef := strings.TrimSpace(plan.Worktrees[0].BaseRef)
+	if baseRef == "" {
+		return firstNonEmpty(plan.RepoState.CurrentRef, plan.RepoState.CurrentCommit)
+	}
+
+	for _, worktree := range plan.Worktrees[1:] {
+		if strings.TrimSpace(worktree.BaseRef) != baseRef {
+			return "multiple"
+		}
+	}
+
+	return baseRef
 }
 
 func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader *bufio.Reader) ([]string, string, string, string, error) {
@@ -350,71 +373,74 @@ func buildDefaultEnvPlans(candidates []model.EnvCandidate, cfg *config.File, pre
 
 func buildDefaultCommandPlans(candidates []model.CommandCandidate, cfg *config.File, presetName string) []model.CommandExecution {
 	selected := map[string]struct{}{}
-	autoRun := false
 	if cfg != nil && presetName != "" {
 		if preset, ok := cfg.Presets[presetName]; ok {
 			for _, id := range preset.Commands {
 				selected[id] = struct{}{}
 			}
 		}
-		autoRun = cfg.ResolveTrustedAutoRun(presetName)
 	}
 
 	plans := make([]model.CommandExecution, 0, len(candidates))
 	for _, candidate := range candidates {
 		_, isSelected := selected[candidate.ID]
-		approved := autoRun && isSelected && candidate.Trusted
 		plans = append(plans, model.CommandExecution{
 			Candidate: candidate,
-			Approved:  approved,
+			Approved:  isSelected,
 		})
 	}
 	return plans
 }
 
 func promptForSelections(reader *bufio.Reader, worktree *model.WorktreePlan, cfg *config.File, presetName string) error {
+	promptEnv := shouldPromptEnvSelections(cfg)
+	promptCommands := shouldPromptCommandSelections(cfg, presetName)
 	lastEnvAction := model.Action("")
-	for i := range worktree.EnvActions {
-		defaultAction := worktree.EnvActions[i].Action
-		if lastEnvAction != "" {
-			defaultAction = lastEnvAction
-			worktree.EnvActions[i].Action = defaultAction
+	if promptEnv {
+		for i := range worktree.EnvActions {
+			defaultAction := worktree.EnvActions[i].Action
+			if lastEnvAction != "" {
+				defaultAction = lastEnvAction
+				worktree.EnvActions[i].Action = defaultAction
+			}
+			prompt := formatEnvPrompt(worktree.Name, worktree.EnvActions[i].Candidate.TargetPath, defaultAction)
+			value, err := promptValue(reader, prompt)
+			if err != nil {
+				return err
+			}
+			if value == "" {
+				continue
+			}
+			action, err := parseAction(value)
+			if err != nil {
+				return err
+			}
+			worktree.EnvActions[i].Action = action
+			lastEnvAction = action
 		}
-		prompt := formatEnvPrompt(worktree.Name, worktree.EnvActions[i].Candidate.TargetPath, defaultAction)
-		value, err := promptValue(reader, prompt)
-		if err != nil {
-			return err
-		}
-		if value == "" {
-			continue
-		}
-		action, err := parseAction(value)
-		if err != nil {
-			return err
-		}
-		worktree.EnvActions[i].Action = action
-		lastEnvAction = action
 	}
 
 	autoRun := cfg != nil && cfg.ResolveTrustedAutoRun(presetName)
-	for i := range worktree.Commands {
-		if autoRun && worktree.Commands[i].Candidate.Trusted {
-			worktree.Commands[i].Approved = true
-			continue
+	if promptCommands {
+		for i := range worktree.Commands {
+			if autoRun && worktree.Commands[i].Candidate.Trusted {
+				worktree.Commands[i].Approved = true
+				continue
+			}
+			defaultAnswer := "n"
+			if worktree.Commands[i].Approved {
+				defaultAnswer = "y"
+			}
+			value, err := promptValue(reader, formatCommandPrompt(worktree.Name, worktree.Commands[i].Candidate.Label, defaultAnswer))
+			if err != nil {
+				return err
+			}
+			if value == "" {
+				worktree.Commands[i].Approved = defaultAnswer == "y"
+				continue
+			}
+			worktree.Commands[i].Approved = parseYesNo(value)
 		}
-		defaultAnswer := "n"
-		if worktree.Commands[i].Approved {
-			defaultAnswer = "y"
-		}
-		value, err := promptValue(reader, formatCommandPrompt(worktree.Name, worktree.Commands[i].Candidate.Label, defaultAnswer))
-		if err != nil {
-			return err
-		}
-		if value == "" {
-			worktree.Commands[i].Approved = defaultAnswer == "y"
-			continue
-		}
-		worktree.Commands[i].Approved = parseYesNo(value)
 	}
 	return nil
 }
@@ -534,12 +560,7 @@ func validateBranchInputs(input Inputs) error {
 }
 
 func branchExists(repoState gitutil.RepoState, branch string) bool {
-	for _, existing := range repoState.LocalBranches {
-		if existing == branch {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(repoState.LocalBranches, branch)
 }
 
 func branchInUse(repoState gitutil.RepoState, branch string) (string, bool) {
@@ -549,4 +570,32 @@ func branchInUse(repoState gitutil.RepoState, branch string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func resolveEffectivePresetName(inputPreset string, cfg *config.File) string {
+	if inputPreset != "" {
+		return inputPreset
+	}
+	if cfg != nil {
+		if _, ok := cfg.Presets["default"]; ok {
+			return "default"
+		}
+	}
+	return ""
+}
+
+func shouldPromptEnvSelections(cfg *config.File) bool {
+	if cfg != nil && len(cfg.EnvFiles) > 0 {
+		return false
+	}
+	return true
+}
+
+func shouldPromptCommandSelections(cfg *config.File, presetName string) bool {
+	if cfg != nil && presetName != "" {
+		if preset, ok := cfg.Presets[presetName]; ok && len(preset.Commands) > 0 {
+			return false
+		}
+	}
+	return true
 }

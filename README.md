@@ -124,7 +124,11 @@ arbor create feature-auth --plan
 arbor create feature-auth
 ```
 
-In interactive mode, Arbor prompts for any unresolved choices, such as which detected env files or commands to use.
+In interactive mode, Arbor prompts only for unresolved choices.
+
+- If `.arbor.yaml` defines `env_files`, Arbor uses those env actions as the plan defaults and does not ask env-action questions during `create`.
+- If `.arbor.yaml` defines `presets.default.commands` and you omit `--preset`, Arbor treats `default` as the selected preset and approves those commands without an extra command prompt.
+- Arbor still prompts for env or command choices when config does not already resolve them.
 
 ### Create a new worktree without prompts
 
@@ -156,7 +160,7 @@ Use `--base` to choose the branch or commit Arbor should branch from when creati
 arbor create feature-auth --preset fast
 ```
 
-Presets preselect env files and commands so common setups stay consistent.
+Presets select env files and commands so common setups stay consistent. When a preset supplies commands, Arbor plans those commands as approved. With an implicit `presets.default`, the same rule applies even when `--preset` is omitted.
 
 ### Override naming and path templates
 
@@ -194,13 +198,14 @@ If the target path already exists, Arbor reports the conflict and leaves the exi
 Arbor can run setup commands after worktree creation, such as dependency installation or a bootstrap script.
 
 - Commands come from your config and from supported project files that Arbor can detect.
-- Presets can preselect commands.
-- Trusted commands can auto-run when both the preset and config allow it.
-- If trust or config does not resolve the choice, Arbor asks before running the command.
+- Presets can select commands, and selected preset commands are planned as approved.
+- If `presets.default.commands` exists, Arbor uses `default` automatically when `--preset` is omitted.
+- Trusted commands and `auto_run` remain useful as config signals, but command prompting is skipped whenever preset command selection already resolves the choice.
+- If config does not resolve command selection, Arbor asks before running the command.
 
 ### Interactive vs non-interactive runs
 
-- Interactive mode is best when you want Arbor to guide you through unresolved choices.
+- Interactive mode is best when you want Arbor to guide you through unresolved choices only.
 - Non-interactive mode is best for repeatable flows in a fully configured repo.
 - `--plan` is useful in either mode when you want a dry run first.
 

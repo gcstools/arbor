@@ -179,7 +179,9 @@ arbor create feature-auth --non-interactive --open-app cursor
 
 Notes:
 
-- Interactive mode prompts for unresolved choices before creating the worktree.
+- Interactive mode prompts only for unresolved choices before creating the worktree.
+- Config-defined `env_files` suppress env-action prompts during `create`.
+- If `presets.default.commands` exists and `--preset` is omitted, Arbor implicitly uses `default` and skips command approval prompts for those selected commands.
 - Non-interactive mode requires enough config and flags to resolve the run without prompts.
 - `--branch` reuses an existing local branch and cannot be combined with `--base` or `--branch-template`.
 
@@ -318,7 +320,9 @@ What it does:
 
 - Offers `.env.shared` as a candidate during `arbor create`.
 - Places it at `.env` inside the new worktree.
-- Uses `symlink` unless the user or preset changes it.
+- Uses `symlink` unless config changes it.
+- Suppresses env-action prompts during `create` because config already defines the env-file plan shape.
+- Emits a warning if `source_path` does not exist on disk.
 
 #### `commands`
 
@@ -345,7 +349,8 @@ What it does:
 
 - Shows `Bootstrap` as a selectable setup step.
 - Runs `pnpm install` inside the new worktree.
-- Allows auto-run only when a preset selects it and trust rules permit it.
+- Lets presets select the command as part of a repeatable setup plan.
+- Executes whenever the final plan marks it approved.
 
 Node projects also get built-in package detection from `package.json`. Arbor offers package-manager-aware setup steps like `pnpm install` and, when present, `pnpm build` instead of prompting for every script in the file.
 
@@ -357,8 +362,8 @@ Use a preset when you want Arbor to answer the same setup questions the same way
 
 - preset name: the key under `presets`, such as `fast` or `full`
 - `description`: short explanation of the preset
-- `env_selection`: list of `env_files` IDs to preselect
-- `commands`: list of command IDs to preselect
+- `env_selection`: list of `env_files` IDs to select
+- `commands`: list of command IDs to select and approve in the plan
 - `auto_run`: requests automatic execution for selected commands, subject to trust rules
 
 Example:
@@ -374,10 +379,10 @@ presets:
 
 What it does:
 
-- Preselects the env file with ID `env`.
-- Preselects the command with ID `bootstrap`.
-- If `bootstrap` is marked `trusted: true` and `defaults.trusted_auto_run` is also `true`, Arbor runs it automatically.
-- If trust rules do not allow auto-run, Arbor still keeps the command selected and asks for confirmation.
+- Selects the env file with ID `env`.
+- Selects and approves the command with ID `bootstrap` in the plan.
+- If you omit `--preset` and define `presets.default`, Arbor applies the same rule implicitly.
+- `trusted_auto_run` and preset `auto_run` remain available config signals, but Arbor no longer needs an interactive confirmation step when preset command selection already resolves the choice.
 
 Example usage:
 
@@ -390,6 +395,27 @@ Think of the relationship like this:
 - `env_files` says which env-file options exist.
 - `commands` says which setup commands exist.
 - `presets` says which of those options should be selected together for a named workflow.
+
+No-prompt example:
+
+```yaml
+env_files:
+  - id: env
+    source_path: .env.shared
+    target_path: .env
+    default_action: copy
+
+commands:
+  - id: bootstrap
+    label: Bootstrap
+    command: pnpm install
+
+presets:
+  default:
+    commands: [bootstrap]
+```
+
+With that config, `arbor create feature-auth` does not ask env-action questions and does not ask whether to run `bootstrap`; the plan already resolves both.
 
 #### `templates`
 

@@ -378,6 +378,283 @@ defaults:
 	}
 }
 
+func TestBuildCreatePlanLoadsFallbackDefaultConfigName(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, "arbor.yml"), `
+defaults:
+  base_ref: main
+  open_app: cursor
+commands:
+  - id: bootstrap
+    label: Bootstrap deps
+    command: bun install
+presets:
+  default:
+    commands: [bootstrap]
+`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, bytes.NewBufferString(""), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	if got := plan.OpenApp; got != "cursor" {
+		t.Fatalf("expected fallback config open app, got %q", got)
+	}
+	if got := plan.Worktrees[0].Preset; got != "default" {
+		t.Fatalf("expected fallback config preset, got %q", got)
+	}
+	if len(plan.Worktrees[0].Commands) != 1 || !plan.Worktrees[0].Commands[0].Approved {
+		t.Fatalf("expected approved command from fallback config, got %#v", plan.Worktrees[0].Commands)
+	}
+}
+
+func TestRenderSummaryUsesPlannedBaseRef(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
+defaults:
+  base_ref: main
+`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, bytes.NewBufferString(""), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	summary := RenderSummary(plan)
+	if !strings.Contains(summary, "base ref: main") {
+		t.Fatalf("expected planned base ref in summary: %s", summary)
+	}
+}
+
+func TestBuildCreatePlanUsesImplicitDefaultPresetCommandsWithoutPrompt(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
+commands:
+  - id: install
+    label: Install deps
+    command: pnpm install
+  - id: build
+    label: Build app
+    command: pnpm build
+presets:
+  default:
+    commands: [install]
+`)
+	// writeFile(t, filepath.Join(root, "package.json"), `{"name":"demo"}`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, bytes.NewBufferString(""), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	if got := plan.Worktrees[0].Preset; got != "default" {
+		t.Fatalf("expected implicit default preset, got %q", got)
+	}
+	if len(plan.Worktrees[0].Commands) != 2 {
+		t.Fatalf("expected 2 commands, got %#v", plan.Worktrees[0].Commands)
+	}
+	if !plan.Worktrees[0].Commands[0].Approved {
+		t.Fatalf("expected selected default preset command to be approved: %#v", plan.Worktrees[0].Commands)
+	}
+	if plan.Worktrees[0].Commands[1].Approved {
+		t.Fatalf("expected unselected command to remain unapproved: %#v", plan.Worktrees[0].Commands)
+	}
+}
+
+func TestBuildCreatePlanUsesImplicitDefaultPresetWhenPresent(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
+presets:
+  default:
+    description: Default local setup
+`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Names:          []string{"feature-auth"},
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	if got := plan.Worktrees[0].Preset; got != "default" {
+		t.Fatalf("expected implicit default preset, got %q", got)
+	}
+}
+
+func TestBuildCreatePlanSkipsEnvPromptsWhenConfigEnvFilesExist(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".env"), "A=1")
+	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
+env_files:
+  - id: env
+    label: Primary env
+    source_path: .env
+    target_path: .env
+    default_action: copy
+`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, bytes.NewBufferString(""), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	if len(plan.Worktrees[0].EnvActions) != 1 {
+		t.Fatalf("expected 1 env action, got %#v", plan.Worktrees[0].EnvActions)
+	}
+	if got := plan.Worktrees[0].EnvActions[0].Action; got != "copy" {
+		t.Fatalf("expected config env action to remain copy, got %q", got)
+	}
+}
+
+func TestBuildCreatePlanStillPromptsCommandsWhenNoDefaultPresetCommands(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
+commands:
+  - id: install
+    label: Install deps
+    command: pnpm install
+presets:
+  default:
+    description: Default local setup
+`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, bytes.NewBufferString("y\n"), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	if len(plan.Worktrees[0].Commands) != 1 {
+		t.Fatalf("expected 1 command, got %#v", plan.Worktrees[0].Commands)
+	}
+	if !plan.Worktrees[0].Commands[0].Approved {
+		t.Fatalf("expected command prompt approval to apply, got %#v", plan.Worktrees[0].Commands)
+	}
+}
+
+func TestExplicitPresetOverridesImplicitDefaultPreset(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
+commands:
+  - id: install
+    label: Install deps
+    command: pnpm install
+  - id: build
+    label: Build app
+    command: pnpm build
+presets:
+  default:
+    commands: [install]
+  fast:
+    commands: [build]
+`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:    root,
+		Names:  []string{"feature-auth"},
+		Preset: "fast",
+	}, bytes.NewBufferString(""), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	if got := plan.Worktrees[0].Preset; got != "fast" {
+		t.Fatalf("expected explicit preset to win, got %q", got)
+	}
+	if plan.Worktrees[0].Commands[0].Approved {
+		t.Fatalf("expected default preset command to stay unapproved: %#v", plan.Worktrees[0].Commands)
+	}
+	if !plan.Worktrees[0].Commands[1].Approved {
+		t.Fatalf("expected explicit preset command to be approved: %#v", plan.Worktrees[0].Commands)
+	}
+}
+
+func TestBuildCreatePlanImplicitDefaultTrustedAutoRunApprovesTrustedAndPromptsUntrusted(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
+defaults:
+  trusted_auto_run: true
+commands:
+  - id: trusted
+    label: Trusted bootstrap
+    command: pnpm install
+    trusted: true
+  - id: untrusted
+    label: Untrusted build
+    command: pnpm build
+presets:
+  default:
+    commands: [trusted, untrusted]
+    auto_run: true
+`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, bytes.NewBufferString(""), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	if len(plan.Worktrees[0].Commands) != 2 {
+		t.Fatalf("expected 2 commands, got %#v", plan.Worktrees[0].Commands)
+	}
+	if !plan.Worktrees[0].Commands[0].Approved {
+		t.Fatalf("expected trusted command approved, got %#v", plan.Worktrees[0].Commands)
+	}
+	if !plan.Worktrees[0].Commands[1].Approved {
+		t.Fatalf("expected selected untrusted command approved without prompt, got %#v", plan.Worktrees[0].Commands)
+	}
+}
+
+func TestBuildCreatePlanWarnsWhenConfiguredEnvFileMissing(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
+env_files:
+  - id: env
+    label: Primary env
+    source_path: .env
+    target_path: .env
+    default_action: copy
+`)
+
+	plan, err := BuildCreatePlan(context.Background(), Inputs{
+		CWD:            root,
+		Names:          []string{"feature-auth"},
+		NonInteractive: true,
+	}, bytes.NewBuffer(nil), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+
+	if len(plan.Warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %#v", plan.Warnings)
+	}
+	if got := plan.Warnings[0]; !strings.Contains(got, `env_files[env]: source path ".env" not found`) {
+		t.Fatalf("unexpected warning: %q", got)
+	}
+	if got := RenderSummary(plan); !strings.Contains(got, `env_files[env]: source path ".env" not found`) {
+		t.Fatalf("expected warning in summary: %s", got)
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

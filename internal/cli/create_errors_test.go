@@ -117,3 +117,25 @@ func TestRenderExecutionSummaryOpenFailure(t *testing.T) {
 		t.Fatalf("unexpected output: %s", got)
 	}
 }
+
+func TestRenderExecutionSummaryWarnings(t *testing.T) {
+	summary := model.ExecutionSummary{
+		RepoRoot: "/repo",
+		Warnings: []string{`env_files[env]: source path ".env" not found`},
+		Worktrees: []model.WorktreeResult{
+			{
+				Branch:  "feature-auth",
+				Path:    "/repo-feature-auth",
+				Created: true,
+			},
+		},
+	}
+
+	got := renderExecutionSummary(summary)
+	if !strings.Contains(got, "warnings:") {
+		t.Fatalf("expected warnings header in output: %s", got)
+	}
+	if !strings.Contains(got, `env_files[env]: source path ".env" not found`) {
+		t.Fatalf("expected warning in output: %s", got)
+	}
+}

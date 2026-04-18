@@ -99,6 +99,13 @@ func renderExecutionSummary(summary model.ExecutionSummary) string {
 	} else {
 		lines = append(lines, "status: success")
 	}
+	if len(summary.Warnings) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "warnings:")
+		for _, warning := range summary.Warnings {
+			lines = append(lines, "  - "+warning)
+		}
+	}
 
 	for _, worktree := range summary.Worktrees {
 		lines = append(lines, "")
