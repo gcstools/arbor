@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/gcstools/arbor/compare/arbor-v0.4.0...arbor-v0.4.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* homebrew version ([0fa4bdd](https://github.com/gcstools/arbor/commit/0fa4bddba931e818330f3bbbcda068dd7224eda9))
+* homebrew version ([1b38f98](https://github.com/gcstools/arbor/commit/1b38f98c86ff58dc18997d052052a58b4228a5c9))
+
 ## [0.4.0](https://github.com/gcstools/arbor/compare/arbor-v0.3.0...arbor-v0.4.0) (2026-04-19)
 
 
