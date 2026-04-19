@@ -40,6 +40,7 @@ type CreatePlan struct {
 }
 
 type nameResolution struct {
+	Prefix string
 	Name   string
 	Branch string
 }
@@ -77,22 +78,28 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 	baseRef := firstNonEmpty(input.BaseRef, cfg.Defaults.BaseRef, repoState.CurrentRef, repoState.CurrentCommit)
 	openApp := firstNonEmpty(input.OpenApp, cfg.Defaults.OpenApp)
 	branchTemplate := firstNonEmpty(input.BranchTemplate, promptBranchTemplate, cfg.Templates.Branch)
-	pathTemplate := firstNonEmpty(input.PathTemplate, promptPathTemplate, cfg.Defaults.WorktreeTemplate, cfg.Templates.Worktree)
+	pathTemplate := firstNonEmpty(input.PathTemplate, promptPathTemplate, cfg.Templates.Worktree, cfg.Defaults.WorktreeTemplate)
 	if pathTemplate == "" {
 		pathTemplate = filepath.Join("..", "{{ .Repo }}-{{ .Name }}")
 	}
 
 	repoName := filepath.Base(repoState.Root)
-	name := resolvedName.Name
+	displayName := joinPrefixName(resolvedName.Prefix, resolvedName.Name)
+	templateName := resolvedName.Name
 	branchMode := model.BranchModeCreate
 	branch := strings.TrimSpace(input.Branch)
+	pathPrefix := resolvedName.Prefix
+	pathName := templateName
 	if branch != "" {
 		branchMode = model.BranchModeExisting
 		if len(trimNonEmpty(input.Names)) == 0 {
-			name = sanitizePathPrefix(branch)
-			if name == "" {
-				name = branch
+			displayName = sanitizePathPrefix(branch)
+			if displayName == "" {
+				displayName = branch
 			}
+		} else {
+			pathName = displayName
+			pathPrefix = ""
 		}
 		if !branchExists(repoState, branch) {
 			return CreatePlan{}, fmt.Errorf("branch does not exist %q", branch)
@@ -104,25 +111,28 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 		branch = resolvedName.Branch
 		if branchTemplate != "" {
 			branch, err = config.RenderTemplate(branchTemplate, config.TemplateData{
-				Name:  name,
-				Index: 1,
-				Base:  baseRef,
-				Repo:  repoName,
+				Prefix: resolvedName.Prefix,
+				Name:   templateName,
+				Index:  1,
+				Base:   baseRef,
+				Repo:   repoName,
+				Branch: branch,
 			})
 			if err != nil {
-				return CreatePlan{}, fmt.Errorf("branch template for %q: %w", name, err)
+				return CreatePlan{}, fmt.Errorf("branch template for %q: %w", displayName, err)
 			}
 		}
 	}
 	pathValue, err := config.RenderTemplate(pathTemplate, config.TemplateData{
-		Name:   name,
+		Prefix: pathPrefix,
+		Name:   pathName,
 		Index:  1,
 		Base:   baseRef,
 		Repo:   repoName,
 		Branch: branch,
 	})
 	if err != nil {
-		return CreatePlan{}, fmt.Errorf("path template for %q: %w", name, err)
+		return CreatePlan{}, fmt.Errorf("path template for %q: %w", displayName, err)
 	}
 	path := config.CleanWorktreePath(filepath.Join(repoState.Root, pathValue))
 	if _, err := os.Stat(path); err == nil {
@@ -136,7 +146,7 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 		}
 	}
 	worktree := model.WorktreePlan{
-		Name:       name,
+		Name:       displayName,
 		Branch:     branch,
 		BranchMode: branchMode,
 		BaseRef:    baseRef,
@@ -225,7 +235,7 @@ func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader 
 			return nameResolution{}, "", "", "", fmt.Errorf("worktree name is required")
 		}
 		if strings.TrimSpace(input.BranchTemplate) != "" {
-			normalizedName, normalizedBranch, err := normalizeCreateName(name)
+			normalizedName, err := normalizeCreateName(name)
 			if err != nil {
 				return nameResolution{}, "", "", "", err
 			}
@@ -234,7 +244,7 @@ func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader 
 					return nameResolution{}, "", "", "", err
 				}
 			}
-			return nameResolution{Name: normalizedName, Branch: normalizedBranch}, input.Preset, "", "", nil
+			return normalizedName, input.Preset, "", "", nil
 		}
 		prefix, err := promptBranchPrefix(in, reader)
 		if err != nil {
@@ -253,7 +263,7 @@ func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader 
 	}
 
 	rawName := strings.Join(parts, " ")
-	name, branch, err := normalizeCreateName(rawName)
+	resolution, err := normalizeCreateName(rawName)
 	if err != nil {
 		return nameResolution{}, "", "", "", err
 	}
@@ -264,7 +274,7 @@ func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader 
 		}
 	}
 
-	return nameResolution{Name: name, Branch: branch}, input.Preset, "", "", nil
+	return resolution, input.Preset, "", "", nil
 }
 
 func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
@@ -395,57 +405,61 @@ func sanitizePathPrefix(value string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-func normalizeCreateName(raw string) (string, string, error) {
+func joinPrefixName(prefix, name string) string {
+	if prefix == "" {
+		return name
+	}
+	return prefix + "-" + name
+}
+
+func normalizeCreateName(raw string) (nameResolution, error) {
 	tokens := strings.Fields(strings.TrimSpace(raw))
 	if len(tokens) == 0 {
-		return "", "", fmt.Errorf("worktree name is required")
+		return nameResolution{}, fmt.Errorf("worktree name is required")
 	}
 
 	name := sanitizePathPrefix(strings.Join(tokens, " "))
 	if name == "" {
-		return "", "", fmt.Errorf("worktree name is required")
+		return nameResolution{}, fmt.Errorf("worktree name is required")
 	}
 	if len(tokens) > 1 {
-		switch strings.ToLower(tokens[0]) {
+		prefix := strings.ToLower(tokens[0])
+		switch prefix {
 		case "feat", "feature", "fix", "chore":
 			remainder := sanitizePathPrefix(strings.Join(tokens[1:], " "))
-			if remainder == "" {
-				prefix := strings.ToLower(tokens[0])
-				return prefix, prefix, nil
+			if remainder != "" {
+				return nameResolution{
+					Prefix: prefix,
+					Name:   remainder,
+					Branch: prefix + "/" + remainder,
+				}, nil
 			}
-			branch := strings.ToLower(tokens[0]) + "/" + remainder
-			return name, branch, nil
 		}
 	}
 
-	return name, name, nil
+	return nameResolution{Name: name, Branch: name}, nil
 }
 
 func normalizeInteractiveCreateName(rawName, prefix string) (nameResolution, error) {
 	prefix = sanitizePathPrefix(prefix)
 	switch prefix {
 	case "":
-		name, branch, err := normalizeCreateName(rawName)
+		resolution, err := normalizeCreateName(rawName)
 		if err != nil {
 			return nameResolution{}, err
 		}
-		return nameResolution{Name: name, Branch: branch}, nil
-	case "feat", "feature", "fix", "chore":
-		name, branch, err := normalizeCreateName(prefix + " " + rawName)
-		if err != nil {
-			return nameResolution{}, err
-		}
-		return nameResolution{Name: name, Branch: branch}, nil
-	default:
-		name := sanitizePathPrefix(rawName)
-		if name == "" {
-			return nameResolution{}, fmt.Errorf("worktree name is required")
-		}
-		return nameResolution{
-			Name:   prefix + "-" + name,
-			Branch: prefix + "/" + name,
-		}, nil
+		return resolution, nil
 	}
+
+	name := sanitizePathPrefix(rawName)
+	if name == "" {
+		return nameResolution{}, fmt.Errorf("worktree name is required")
+	}
+	return nameResolution{
+		Prefix: prefix,
+		Name:   name,
+		Branch: prefix + "/" + name,
+	}, nil
 }
 
 func buildDefaultEnvPlans(candidates []model.EnvCandidate, cfg *config.File, presetName string) []model.EnvPlan {

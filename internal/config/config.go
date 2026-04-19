@@ -36,7 +36,7 @@ type Defaults struct {
 	CommandScope     model.CommandScope `yaml:"command_scope"`
 	TrustedAutoRun   bool               `yaml:"trusted_auto_run"`
 	OpenApp          string             `yaml:"open_app"`
-	WorktreeTemplate string             `yaml:"worktree_template"`
+	WorktreeTemplate string             `yaml:"worktree_template,omitempty"`
 }
 
 type EnvFileRule struct {
@@ -126,7 +126,6 @@ func StarterConfig() *File {
 			EnvAction:        model.ActionSymlink,
 			CommandScope:     model.CommandScopePerWorktree,
 			TrustedAutoRun:   false,
-			WorktreeTemplate: "../{{ .Repo }}-{{ .Name }}",
 		},
 		EnvFiles: []EnvFileRule{
 			{
@@ -153,8 +152,8 @@ func StarterConfig() *File {
 			},
 		},
 		Templates: Templates{
-			Branch:   "{{ .Name }}",
-			Worktree: "../{{ .Repo }}-{{ .Name }}",
+			Branch:   "{{ .Prefix }}/{{ .Name }}",
+			Worktree: "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}",
 		},
 	}
 	cfg.applyDefaults()
