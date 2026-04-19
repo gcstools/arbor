@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/gcstools/arbor/compare/arbor-v0.3.0...arbor-v0.4.0) (2026-04-19)
+
+
+### Features
+
+* improve cli when arbor config exists ([e6d218f](https://github.com/gcstools/arbor/commit/e6d218f50ddaf27ffa946ed1eae5e180d3002277))
+* normalize prefix ([857fd82](https://github.com/gcstools/arbor/commit/857fd82d72b87d39fd396c25b20a660f8695e78c))
+* separate prefix from slug ([980f7c1](https://github.com/gcstools/arbor/commit/980f7c19a79b4a15c7c63f2738c034f863f44ee2))
+* update docs ([0912fbc](https://github.com/gcstools/arbor/commit/0912fbc8656f7738611a088d5d04ed35bf26e6fc))
+
+
+### Bug Fixes
+
+* create worktree name with many args ([384ad8d](https://github.com/gcstools/arbor/commit/384ad8d94f828bb00473ab55a8645c7008132b1a))
+* old tests with worktree_template ([18011ca](https://github.com/gcstools/arbor/commit/18011cafba11997085225a4cccd96aa4fbb92773))
+* remove unused worktree_template ([6735fa0](https://github.com/gcstools/arbor/commit/6735fa03cabe29a635a48177fdc29547de38c6bb))
+
 ## [0.3.0](https://github.com/gcstools/arbor/compare/arbor-v0.2.1...arbor-v0.3.0) (2026-03-20)
 
 
