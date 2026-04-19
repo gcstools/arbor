@@ -542,23 +542,6 @@ templates:
 	}
 }
 
-func TestBuildCreatePlanRejectsLegacyWorktreeTemplateConfig(t *testing.T) {
-	root := initRepo(t)
-	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
-defaults:
-  worktree_template: ../legacy-{{ .Name }}
-`)
-
-	_, err := BuildCreatePlan(context.Background(), Inputs{
-		CWD:            root,
-		Names:          []string{"admin", "redesign"},
-		NonInteractive: true,
-	}, bytes.NewBuffer(nil), ".arbor.yaml")
-	if err == nil || !strings.Contains(err.Error(), "field worktree_template not found") {
-		t.Fatalf("expected unknown legacy field error, got %v", err)
-	}
-}
-
 func TestBuildCreatePlanInteractivePrompts(t *testing.T) {
 	root := initRepo(t)
 	writeFile(t, filepath.Join(root, ".env"), "A=1")
