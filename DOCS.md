@@ -2,7 +2,7 @@
 
 Arbor is a Go CLI for creating a Git worktree and bootstrapping it with env files and setup commands.
 
-Use [README.md](/Users/simon/work/github/arbor/README.md) as the end-user guide. This document keeps the full reference plus source/developer-oriented instructions.
+Use [README.md](README.md) as the end-user guide. This document keeps the full reference plus source/developer-oriented instructions.
 
 ## Install From Homebrew
 
@@ -166,8 +166,8 @@ Override branch naming and path templates:
 
 ```bash
 arbor create feature-auth \
-  --branch-template 'feature/{{ .Name }}' \
-  --path-template '../{{ .Repo }}-{{ .Name }}' \
+  --branch-template '{{ .Prefix }}/{{ .Name }}' \
+  --path-template '../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}' \
   --plan
 ```
 
@@ -247,7 +247,6 @@ defaults:
   command_scope: per_worktree
   trusted_auto_run: true
   open_app: cursor
-  worktree_template: ../{{ .Repo }}-{{ .Name }}
 
 env_files:
   - id: env
@@ -266,6 +265,10 @@ presets:
     env_selection: [env]
     commands: [bootstrap]
     auto_run: true
+
+templates:
+  branch: "{{ .Prefix }}/{{ .Name }}"
+  worktree: "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}"
 ```
 
 ### Config Sections
@@ -279,7 +282,7 @@ Defines fallback behavior Arbor uses when the command line or a preset does not 
 - `command_scope`: default execution scope for commands. Current value is `per_worktree`.
 - `trusted_auto_run`: allows trusted preset commands to execute automatically.
 - `open_app`: executable Arbor runs after setup to open the created worktree folder.
-- `worktree_template`: default template for generated worktree paths.
+- `worktree_template`: legacy fallback template for generated worktree paths when `templates.worktree` is not set.
 
 Example:
 
@@ -290,7 +293,7 @@ defaults:
   command_scope: per_worktree
   trusted_auto_run: true
   open_app: cursor
-  worktree_template: ../{{ .Repo }}-{{ .Name }}
+  worktree_template: ../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}
 ```
 
 When `open_app` is set, Arbor waits for env actions and approved commands to finish, then runs `<open_app> <worktree-path>` for the created worktree.
@@ -426,7 +429,8 @@ Provides reusable templates for naming branches and worktree paths.
 
 Template variables currently used by Arbor:
 
-- `.Name`: worktree input name
+- `.Prefix`: normalized branch prefix, empty when none is present.
+- `.Name`: normalized slug after the prefix, or the full slug when no prefix exists.
 - `.Repo`: repo directory name
 - `.Base`: selected base ref
 - `.Branch`: resolved branch name when rendering worktree paths
@@ -435,14 +439,27 @@ Example:
 
 ```yaml
 templates:
-  branch: {{ .Name }}
-  worktree: ../{{ .Repo }}-{{ .Name }}
+  branch: "{{ .Prefix }}/{{ .Name }}"
+  worktree: "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}"
 ```
 
 What it does:
 
-- Turns a worktree named `auth` into branch `feature/auth`.
-- Places the worktree next to the repo as `../myrepo-auth`.
+- Splits the branch namespace into `.Prefix` and `.Name` so branch templates can describe both the prefix and the slug.
+- Uses `.Prefix` to build nested branch names like `feature/auth`.
+- Places the worktree next to the repo as `../myrepo-feature-auth`.
+
+Template variables:
+
+- `.Prefix`: normalized branch prefix, empty when none is present.
+- `.Name`: normalized slug after the prefix, or the full slug when no prefix exists.
+- `.Repo`: repo directory name.
+- `.Base`: selected base ref.
+- `.Branch`: resolved branch name when rendering worktree paths.
+
+When `.Prefix` is empty, Arbor removes one adjacent `/` or `-` separator for bare `{{ .Prefix }}` placeholders so templates can omit conditionals.
+
+For `--branch` plans, Arbor keeps the attached-branch path behavior stable. If you attach to an existing branch, path template rendering may flatten the branch into a single display slug instead of preserving a split `.Prefix`/`.Name` pair.
 
 ### Config Precedence
 

@@ -2,7 +2,7 @@
 
 Arbor is a CLI for creating Git worktrees and setting env files, reusable setup commands, and optional app launching.
 
-`README.md` is the end-user guide. For full config reference, source builds, and maintainer/developer docs, see [DOCS.md](/Users/simon/work/github/arbor/DOCS.md).
+`README.md` is the end-user guide. For full config reference, source builds, and maintainer/developer docs, see [DOCS.md](DOCS.md).
 
 ## Install
 
@@ -89,6 +89,10 @@ presets:
     env_selection: [env]
     commands: [bootstrap]
     auto_run: true
+
+templates:
+  branch: "{{ .Prefix }}/{{ .Name }}"
+  worktree: "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}"
 ```
 
 Use config to answer the choices Arbor would otherwise need to ask interactively:
@@ -97,6 +101,14 @@ Use config to answer the choices Arbor would otherwise need to ask interactively
 - `env_files` declares which files Arbor can copy or symlink into the new worktree.
 - `commands` defines reusable setup steps Arbor can run after creating the worktree.
 - `presets` bundles env files and commands into named workflows such as `fast` or `full`.
+
+Template variables used by Arbor:
+
+- `.Prefix`: normalized branch prefix, empty when none exists.
+- `.Name`: normalized slug after the prefix, or the full slug when no prefix exists.
+- `.Repo`, `.Base`, and `.Branch`: repo name, selected base ref, and resolved branch name.
+
+When `.Prefix` is empty, Arbor removes one adjacent `/` or `-` separator for bare `{{ .Prefix }}` placeholders, so templates can stay branch-free without conditionals.
 
 ## Preview What Arbor Detects
 
@@ -166,8 +178,8 @@ Presets select env files and commands so common setups stay consistent. When a p
 
 ```bash
 arbor create feature-auth \
-  --branch-template 'feature/{{ .Name }}' \
-  --path-template '../{{ .Repo }}-{{ .Name }}' \
+  --branch-template '{{ .Prefix }}/{{ .Name }}' \
+  --path-template '../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}' \
   --plan
 ```
 
