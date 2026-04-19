@@ -55,7 +55,8 @@ jobs:
           VERSION: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          VERSION_STRIPPED="${VERSION#v}"
+          VERSION_STRIPPED="${VERSION#arbor-v}"
+          VERSION_STRIPPED="${VERSION_STRIPPED#v}"
           DIST_DIR="dist"
           ARCHIVE_BASENAME="arbor_${VERSION_STRIPPED}_${GOOS}_${GOARCH}"
           mkdir -p "${DIST_DIR}/${ARCHIVE_BASENAME}"
@@ -118,7 +119,8 @@ jobs:
           VERSION: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          VERSION_STRIPPED="${VERSION#v}"
+          VERSION_STRIPPED="${VERSION#arbor-v}"
+          VERSION_STRIPPED="${VERSION_STRIPPED#v}"
           echo "darwin_arm64=$(shasum -a 256 dist/arbor_${VERSION_STRIPPED}_darwin_arm64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
           echo "darwin_amd64=$(shasum -a 256 dist/arbor_${VERSION_STRIPPED}_darwin_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
           echo "linux_amd64=$(shasum -a 256 dist/arbor_${VERSION_STRIPPED}_linux_amd64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
@@ -138,7 +140,8 @@ jobs:
           SHA_LINUX_AMD64: ${{ steps.checksums.outputs.linux_amd64 }}
         run: |
           set -euo pipefail
-          VERSION_STRIPPED="${VERSION#v}"
+          VERSION_STRIPPED="${VERSION#arbor-v}"
+          VERSION_STRIPPED="${VERSION_STRIPPED#v}"
           mkdir -p homebrew-tap/Formula
           cat <<EOF > homebrew-tap/Formula/arbor.rb
           class Arbor < Formula
