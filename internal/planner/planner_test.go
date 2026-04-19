@@ -309,10 +309,10 @@ func TestBuildCreatePlanWithExistingBranchPathTemplateUsesDisplayNameForCustomNa
 	runGit(t, root, "branch", "feature/auth", "main")
 
 	plan, err := BuildCreatePlan(context.Background(), Inputs{
-		CWD:          root,
-		Names:        []string{"feat", "api"},
-		Branch:       "feature/auth",
-		PathTemplate: "../{{ .Repo }}-{{ .Name }}",
+		CWD:            root,
+		Names:          []string{"feat", "api"},
+		Branch:         "feature/auth",
+		PathTemplate:   "../{{ .Repo }}-{{ .Name }}",
 		NonInteractive: true,
 	}, bytes.NewBuffer(nil), ".arbor.yaml")
 	if err != nil {
@@ -528,8 +528,8 @@ func TestBuildCreatePlanRejectsExistingPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
-defaults:
-  worktree_template: ../{{ .Repo }}-{{ .Name }}
+templates:
+  worktree: ../{{ .Repo }}-{{ .Name }}
 `)
 
 	_, err := BuildCreatePlan(context.Background(), Inputs{
@@ -542,26 +542,20 @@ defaults:
 	}
 }
 
-func TestBuildCreatePlanPrefersTemplatesWorktreeOverLegacyDefault(t *testing.T) {
+func TestBuildCreatePlanRejectsLegacyWorktreeTemplateConfig(t *testing.T) {
 	root := initRepo(t)
 	writeFile(t, filepath.Join(root, ".arbor.yaml"), `
 defaults:
   worktree_template: ../legacy-{{ .Name }}
-templates:
-  worktree: ../modern-{{ .Name }}
 `)
 
-	plan, err := BuildCreatePlan(context.Background(), Inputs{
+	_, err := BuildCreatePlan(context.Background(), Inputs{
 		CWD:            root,
 		Names:          []string{"admin", "redesign"},
 		NonInteractive: true,
 	}, bytes.NewBuffer(nil), ".arbor.yaml")
-	if err != nil {
-		t.Fatalf("BuildCreatePlan returned error: %v", err)
-	}
-	wantPath := filepath.Join(filepath.Dir(root), "modern-admin-redesign")
-	if got := plan.Worktrees[0].Path; got != wantPath {
-		t.Fatalf("unexpected worktree path: %q", got)
+	if err == nil || !strings.Contains(err.Error(), "field worktree_template not found") {
+		t.Fatalf("expected unknown legacy field error, got %v", err)
 	}
 }
 

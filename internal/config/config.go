@@ -31,12 +31,11 @@ type File struct {
 }
 
 type Defaults struct {
-	BaseRef          string             `yaml:"base_ref"`
-	EnvAction        model.Action       `yaml:"env_action"`
-	CommandScope     model.CommandScope `yaml:"command_scope"`
-	TrustedAutoRun   bool               `yaml:"trusted_auto_run"`
-	OpenApp          string             `yaml:"open_app"`
-	WorktreeTemplate string             `yaml:"worktree_template,omitempty"`
+	BaseRef        string             `yaml:"base_ref"`
+	EnvAction      model.Action       `yaml:"env_action"`
+	CommandScope   model.CommandScope `yaml:"command_scope"`
+	TrustedAutoRun bool               `yaml:"trusted_auto_run"`
+	OpenApp        string             `yaml:"open_app"`
 }
 
 type EnvFileRule struct {
@@ -123,9 +122,9 @@ func StarterConfig() *File {
 	cfg := &File{
 		Path: DefaultConfigPath,
 		Defaults: Defaults{
-			EnvAction:        model.ActionSymlink,
-			CommandScope:     model.CommandScopePerWorktree,
-			TrustedAutoRun:   false,
+			EnvAction:      model.ActionSymlink,
+			CommandScope:   model.CommandScopePerWorktree,
+			TrustedAutoRun: false,
 		},
 		EnvFiles: []EnvFileRule{
 			{

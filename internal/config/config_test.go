@@ -113,9 +113,6 @@ func TestResolvePresetMissing(t *testing.T) {
 
 func TestStarterConfigTemplates(t *testing.T) {
 	cfg := StarterConfig()
-	if got := cfg.Defaults.WorktreeTemplate; got != "" {
-		t.Fatalf("starter config should leave defaults.worktree_template empty, got %q", got)
-	}
 	if got := cfg.Templates.Branch; got != "{{ .Prefix }}/{{ .Name }}" {
 		t.Fatalf("unexpected branch template: %q", got)
 	}
@@ -133,5 +130,21 @@ func TestStarterConfigTemplates(t *testing.T) {
 	}
 	if strings.Contains(text, "worktree_template:") {
 		t.Fatalf("starter config should not serialize defaults.worktree_template when templates.worktree is the source of truth:\n%s", text)
+	}
+}
+
+func TestLoadRejectsLegacyWorktreeTemplate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".arbor.yaml")
+	if err := os.WriteFile(path, []byte(`
+defaults:
+  worktree_template: ../legacy-{{ .Name }}
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "field worktree_template not found") {
+		t.Fatalf("expected unknown legacy field error, got %v", err)
 	}
 }

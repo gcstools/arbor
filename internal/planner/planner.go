@@ -78,7 +78,7 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 	baseRef := firstNonEmpty(input.BaseRef, cfg.Defaults.BaseRef, repoState.CurrentRef, repoState.CurrentCommit)
 	openApp := firstNonEmpty(input.OpenApp, cfg.Defaults.OpenApp)
 	branchTemplate := firstNonEmpty(input.BranchTemplate, promptBranchTemplate, cfg.Templates.Branch)
-	pathTemplate := firstNonEmpty(input.PathTemplate, promptPathTemplate, cfg.Templates.Worktree, cfg.Defaults.WorktreeTemplate)
+	pathTemplate := firstNonEmpty(input.PathTemplate, promptPathTemplate, cfg.Templates.Worktree)
 	if pathTemplate == "" {
 		pathTemplate = filepath.Join("..", "{{ .Repo }}-{{ .Name }}")
 	}

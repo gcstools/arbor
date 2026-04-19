@@ -282,19 +282,6 @@ Defines fallback behavior Arbor uses when the command line or a preset does not 
 - `command_scope`: default execution scope for commands. Current value is `per_worktree`.
 - `trusted_auto_run`: allows trusted preset commands to execute automatically.
 - `open_app`: executable Arbor runs after setup to open the created worktree folder.
-- `worktree_template`: legacy fallback template for generated worktree paths when `templates.worktree` is not set.
-
-Example:
-
-```yaml
-defaults:
-  base_ref: main
-  env_action: symlink
-  command_scope: per_worktree
-  trusted_auto_run: true
-  open_app: cursor
-  worktree_template: ../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}
-```
 
 When `open_app` is set, Arbor waits for env actions and approved commands to finish, then runs `<open_app> <worktree-path>` for the created worktree.
 
