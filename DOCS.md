@@ -2,7 +2,7 @@
 
 Arbor is a Go CLI for creating a Git worktree and bootstrapping it with env files and setup commands.
 
-Use [README.md](/Users/simon/work/github/arbor/README.md) as the end-user guide. This document keeps the full reference plus source/developer-oriented instructions.
+Use [README.md](README.md) as the end-user guide. This document keeps the full reference plus source/developer-oriented instructions.
 
 ## Install From Homebrew
 
@@ -166,8 +166,8 @@ Override branch naming and path templates:
 
 ```bash
 arbor create feature-auth \
-  --branch-template 'feature/{{ .Name }}' \
-  --path-template '../{{ .Repo }}-{{ .Name }}' \
+  --branch-template '{{ .Prefix }}/{{ .Name }}' \
+  --path-template '../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}' \
   --plan
 ```
 
@@ -179,7 +179,9 @@ arbor create feature-auth --non-interactive --open-app cursor
 
 Notes:
 
-- Interactive mode prompts for unresolved choices before creating the worktree.
+- Interactive mode prompts only for unresolved choices before creating the worktree.
+- Config-defined `env_files` suppress env-action prompts during `create`.
+- If `presets.default.commands` exists and `--preset` is omitted, Arbor implicitly uses `default` and skips command approval prompts for those selected commands.
 - Non-interactive mode requires enough config and flags to resolve the run without prompts.
 - `--branch` reuses an existing local branch and cannot be combined with `--base` or `--branch-template`.
 
@@ -245,7 +247,6 @@ defaults:
   command_scope: per_worktree
   trusted_auto_run: true
   open_app: cursor
-  worktree_template: ../{{ .Repo }}-{{ .Name }}
 
 env_files:
   - id: env
@@ -264,6 +265,10 @@ presets:
     env_selection: [env]
     commands: [bootstrap]
     auto_run: true
+
+templates:
+  branch: "{{ .Prefix }}/{{ .Name }}"
+  worktree: "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}"
 ```
 
 ### Config Sections
@@ -277,19 +282,6 @@ Defines fallback behavior Arbor uses when the command line or a preset does not 
 - `command_scope`: default execution scope for commands. Current value is `per_worktree`.
 - `trusted_auto_run`: allows trusted preset commands to execute automatically.
 - `open_app`: executable Arbor runs after setup to open the created worktree folder.
-- `worktree_template`: default template for generated worktree paths.
-
-Example:
-
-```yaml
-defaults:
-  base_ref: main
-  env_action: symlink
-  command_scope: per_worktree
-  trusted_auto_run: true
-  open_app: cursor
-  worktree_template: ../{{ .Repo }}-{{ .Name }}
-```
 
 When `open_app` is set, Arbor waits for env actions and approved commands to finish, then runs `<open_app> <worktree-path>` for the created worktree.
 
@@ -318,7 +310,9 @@ What it does:
 
 - Offers `.env.shared` as a candidate during `arbor create`.
 - Places it at `.env` inside the new worktree.
-- Uses `symlink` unless the user or preset changes it.
+- Uses `symlink` unless config changes it.
+- Suppresses env-action prompts during `create` because config already defines the env-file plan shape.
+- Emits a warning if `source_path` does not exist on disk.
 
 #### `commands`
 
@@ -345,7 +339,8 @@ What it does:
 
 - Shows `Bootstrap` as a selectable setup step.
 - Runs `pnpm install` inside the new worktree.
-- Allows auto-run only when a preset selects it and trust rules permit it.
+- Lets presets select the command as part of a repeatable setup plan.
+- Executes whenever the final plan marks it approved.
 
 Node projects also get built-in package detection from `package.json`. Arbor offers package-manager-aware setup steps like `pnpm install` and, when present, `pnpm build` instead of prompting for every script in the file.
 
@@ -357,8 +352,8 @@ Use a preset when you want Arbor to answer the same setup questions the same way
 
 - preset name: the key under `presets`, such as `fast` or `full`
 - `description`: short explanation of the preset
-- `env_selection`: list of `env_files` IDs to preselect
-- `commands`: list of command IDs to preselect
+- `env_selection`: list of `env_files` IDs to select
+- `commands`: list of command IDs to select and approve in the plan
 - `auto_run`: requests automatic execution for selected commands, subject to trust rules
 
 Example:
@@ -374,10 +369,10 @@ presets:
 
 What it does:
 
-- Preselects the env file with ID `env`.
-- Preselects the command with ID `bootstrap`.
-- If `bootstrap` is marked `trusted: true` and `defaults.trusted_auto_run` is also `true`, Arbor runs it automatically.
-- If trust rules do not allow auto-run, Arbor still keeps the command selected and asks for confirmation.
+- Selects the env file with ID `env`.
+- Selects and approves the command with ID `bootstrap` in the plan.
+- If you omit `--preset` and define `presets.default`, Arbor applies the same rule implicitly.
+- `trusted_auto_run` and preset `auto_run` remain available config signals, but Arbor no longer needs an interactive confirmation step when preset command selection already resolves the choice.
 
 Example usage:
 
@@ -391,6 +386,27 @@ Think of the relationship like this:
 - `commands` says which setup commands exist.
 - `presets` says which of those options should be selected together for a named workflow.
 
+No-prompt example:
+
+```yaml
+env_files:
+  - id: env
+    source_path: .env.shared
+    target_path: .env
+    default_action: copy
+
+commands:
+  - id: bootstrap
+    label: Bootstrap
+    command: pnpm install
+
+presets:
+  default:
+    commands: [bootstrap]
+```
+
+With that config, `arbor create feature-auth` does not ask env-action questions and does not ask whether to run `bootstrap`; the plan already resolves both.
+
 #### `templates`
 
 Provides reusable templates for naming branches and worktree paths.
@@ -400,7 +416,8 @@ Provides reusable templates for naming branches and worktree paths.
 
 Template variables currently used by Arbor:
 
-- `.Name`: worktree input name
+- `.Prefix`: normalized branch prefix, empty when none is present.
+- `.Name`: normalized slug after the prefix, or the full slug when no prefix exists.
 - `.Repo`: repo directory name
 - `.Base`: selected base ref
 - `.Branch`: resolved branch name when rendering worktree paths
@@ -409,14 +426,27 @@ Example:
 
 ```yaml
 templates:
-  branch: feature/{{ .Name }}
-  worktree: ../{{ .Repo }}-{{ .Name }}
+  branch: "{{ .Prefix }}/{{ .Name }}"
+  worktree: "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}"
 ```
 
 What it does:
 
-- Turns a worktree named `auth` into branch `feature/auth`.
-- Places the worktree next to the repo as `../myrepo-auth`.
+- Splits the branch namespace into `.Prefix` and `.Name` so branch templates can describe both the prefix and the slug.
+- Uses `.Prefix` to build nested branch names like `feature/auth`.
+- Places the worktree next to the repo as `../myrepo-feature-auth`.
+
+Template variables:
+
+- `.Prefix`: normalized branch prefix, empty when none is present.
+- `.Name`: normalized slug after the prefix, or the full slug when no prefix exists.
+- `.Repo`: repo directory name.
+- `.Base`: selected base ref.
+- `.Branch`: resolved branch name when rendering worktree paths.
+
+When `.Prefix` is empty, Arbor removes one adjacent `/` or `-` separator for bare `{{ .Prefix }}` placeholders so templates can omit conditionals.
+
+For `--branch` plans, Arbor keeps the attached-branch path behavior stable. If you attach to an existing branch, path template rendering may flatten the branch into a single display slug instead of preserving a split `.Prefix`/`.Name` pair.
 
 ### Config Precedence
 

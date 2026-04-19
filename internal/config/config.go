@@ -15,6 +15,12 @@ import (
 
 const DefaultConfigPath = ".arbor.yaml"
 
+var defaultConfigFallbackNames = []string{
+	".arbor.yml",
+	"arbor.yaml",
+	"arbor.yml",
+}
+
 type File struct {
 	Path      string
 	Defaults  Defaults                 `yaml:"defaults"`
@@ -25,12 +31,11 @@ type File struct {
 }
 
 type Defaults struct {
-	BaseRef          string             `yaml:"base_ref"`
-	EnvAction        model.Action       `yaml:"env_action"`
-	CommandScope     model.CommandScope `yaml:"command_scope"`
-	TrustedAutoRun   bool               `yaml:"trusted_auto_run"`
-	OpenApp          string             `yaml:"open_app"`
-	WorktreeTemplate string             `yaml:"worktree_template"`
+	BaseRef        string             `yaml:"base_ref"`
+	EnvAction      model.Action       `yaml:"env_action"`
+	CommandScope   model.CommandScope `yaml:"command_scope"`
+	TrustedAutoRun bool               `yaml:"trusted_auto_run"`
+	OpenApp        string             `yaml:"open_app"`
 }
 
 type EnvFileRule struct {
@@ -83,11 +88,30 @@ func LoadOptional(path string) (*File, error) {
 		return cfg, nil
 	}
 	if errors.Is(err, os.ErrNotExist) {
+		if fallback := resolveFallbackPath(path); fallback != "" {
+			return Load(fallback)
+		}
 		empty := &File{Path: ""}
 		empty.applyDefaults()
 		return empty, nil
 	}
 	return nil, err
+}
+
+func resolveFallbackPath(path string) string {
+	if filepath.Base(path) != DefaultConfigPath {
+		return ""
+	}
+
+	dir := filepath.Dir(path)
+	for _, name := range defaultConfigFallbackNames {
+		candidate := filepath.Join(dir, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	return ""
 }
 
 func (f *File) MarshalYAML() ([]byte, error) {
@@ -98,10 +122,9 @@ func StarterConfig() *File {
 	cfg := &File{
 		Path: DefaultConfigPath,
 		Defaults: Defaults{
-			EnvAction:        model.ActionSymlink,
-			CommandScope:     model.CommandScopePerWorktree,
-			TrustedAutoRun:   false,
-			WorktreeTemplate: "../{{ .Repo }}-{{ .Name }}",
+			EnvAction:      model.ActionSymlink,
+			CommandScope:   model.CommandScopePerWorktree,
+			TrustedAutoRun: false,
 		},
 		EnvFiles: []EnvFileRule{
 			{
@@ -128,8 +151,8 @@ func StarterConfig() *File {
 			},
 		},
 		Templates: Templates{
-			Branch:   "feature/{{ .Name }}",
-			Worktree: "../{{ .Repo }}-{{ .Name }}",
+			Branch:   "{{ .Prefix }}/{{ .Name }}",
+			Worktree: "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}",
 		},
 	}
 	cfg.applyDefaults()

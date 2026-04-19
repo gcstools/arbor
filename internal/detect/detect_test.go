@@ -3,6 +3,7 @@ package detect
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"arbor/internal/config"
@@ -29,9 +30,12 @@ func TestDetectEnvFiles(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(root, "config", ".env.shared"), "A=1")
 
-	candidates, err := DetectEnvFiles(root, cfg)
+	candidates, warnings, err := DetectEnvFiles(root, cfg)
 	if err != nil {
 		t.Fatalf("DetectEnvFiles returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %#v", warnings)
 	}
 	if len(candidates) != 5 {
 		t.Fatalf("got %d candidates", len(candidates))
@@ -48,9 +52,12 @@ func TestDetectEnvFilesFindsNestedEnvFiles(t *testing.T) {
 	writeFile(t, filepath.Join(root, "packages", "api", ".env.test"), "A=1")
 	writeFile(t, filepath.Join(root, "packages", "api", ".env.example"), "A=1")
 
-	candidates, err := DetectEnvFiles(root, nil)
+	candidates, warnings, err := DetectEnvFiles(root, nil)
 	if err != nil {
 		t.Fatalf("DetectEnvFiles returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %#v", warnings)
 	}
 	if len(candidates) != 3 {
 		t.Fatalf("got %d candidates", len(candidates))
@@ -89,9 +96,12 @@ func TestDetectEnvFilesConfigOverridesNestedTarget(t *testing.T) {
 		},
 	}
 
-	candidates, err := DetectEnvFiles(root, cfg)
+	candidates, warnings, err := DetectEnvFiles(root, cfg)
 	if err != nil {
 		t.Fatalf("DetectEnvFiles returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %#v", warnings)
 	}
 	if len(candidates) != 2 {
 		t.Fatalf("got %d candidates", len(candidates))
@@ -117,6 +127,35 @@ func TestDetectEnvFilesConfigOverridesNestedTarget(t *testing.T) {
 	}
 }
 
+func TestDetectEnvFilesWarnsWhenConfiguredSourceMissing(t *testing.T) {
+	root := t.TempDir()
+
+	cfg := &config.File{
+		EnvFiles: []config.EnvFileRule{
+			{
+				ID:         "missing-env",
+				Label:      "Missing env",
+				SourcePath: "config/.env.shared",
+				TargetPath: ".env.shared",
+			},
+		},
+	}
+
+	candidates, warnings, err := DetectEnvFiles(root, cfg)
+	if err != nil {
+		t.Fatalf("DetectEnvFiles returned error: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("expected no candidates, got %#v", candidates)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %#v", warnings)
+	}
+	if got := warnings[0]; !strings.Contains(got, `env_files[missing-env]: source path "config/.env.shared" not found`) {
+		t.Fatalf("unexpected warning: %q", got)
+	}
+}
+
 func TestDetectCommands(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "package.json"), `{"scripts":{"dev":"vite","build":"vite build","test":"vitest"}}`)
@@ -139,8 +178,41 @@ func TestDetectCommands(t *testing.T) {
 	if len(commands) != 5 {
 		t.Fatalf("got %d commands", len(commands))
 	}
-	if commands[3].ID != "node-install" || commands[4].ID != "node-build" {
-		t.Fatalf("expected node build/install commands, got %#v", commands)
+	gotIDs := make([]string, 0, len(commands))
+	for _, command := range commands {
+		gotIDs = append(gotIDs, command.ID)
+	}
+	wantIDs := []string{"node-install", "node-build", "make-build", "just-lint", "bootstrap"}
+	if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
+		t.Fatalf("unexpected command order: got %#v want %#v", gotIDs, wantIDs)
+	}
+}
+
+func TestDetectCommandsConfigOverridePreservesOriginalPosition(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "package.json"), `{"scripts":{"build":"vite build"}}`)
+
+	cfg := &config.File{
+		Commands: []model.CommandCandidate{
+			{ID: "node-build", Label: "Build override", Command: "pnpm build:ci", Scope: model.CommandScopePerWorktree},
+		},
+	}
+
+	commands, warnings, err := DetectCommands(root, cfg)
+	if err != nil {
+		t.Fatalf("DetectCommands returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %#v", warnings)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("got %d commands", len(commands))
+	}
+	if commands[0].ID != "node-install" || commands[1].ID != "node-build" {
+		t.Fatalf("unexpected command order: %#v", commands)
+	}
+	if commands[1].Label != "Build override" || commands[1].Command != "pnpm build:ci" || commands[1].Source != "config" {
+		t.Fatalf("expected config override in original position, got %#v", commands[1])
 	}
 }
 

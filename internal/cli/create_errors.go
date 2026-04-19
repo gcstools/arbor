@@ -34,10 +34,6 @@ func formatCreatePlanError(err error) error {
 	case errors.Is(err, gitutil.ErrNotGitRepository):
 		message = "Arbor could not find a Git repository from the current directory.\n" +
 			"Next step: run this command inside a Git repo or pass a path inside one."
-	case strings.Contains(err.Error(), "exactly one worktree name is supported"):
-		message = "Arbor can only create one worktree at a time.\n" +
-			"Details: `arbor create` received more than one name.\n" +
-			"Next step: rerun the command with a single worktree name."
 	case strings.Contains(err.Error(), "worktree name is required in non-interactive mode"):
 		message = "Arbor could not choose a worktree name in non-interactive mode.\n" +
 			"Details: no worktree name was provided and prompts are disabled.\n" +
@@ -99,11 +95,19 @@ func renderExecutionSummary(summary model.ExecutionSummary) string {
 	} else {
 		lines = append(lines, "status: success")
 	}
+	if len(summary.Warnings) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "warnings:")
+		for _, warning := range summary.Warnings {
+			lines = append(lines, "  - "+warning)
+		}
+	}
 
 	for _, worktree := range summary.Worktrees {
 		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("worktree %s", worktree.Branch))
 		lines = append(lines, fmt.Sprintf("  path: %s", worktree.Path))
+		lines = append(lines, fmt.Sprintf("  branch: %s", worktree.Branch))
 		lines = append(lines, fmt.Sprintf("  created: %t", worktree.Created))
 		if worktree.Error != "" {
 			lines = append(lines, "  summary: "+formatWorktreeErrorSummary(worktree))

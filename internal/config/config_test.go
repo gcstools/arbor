@@ -111,11 +111,21 @@ func TestResolvePresetMissing(t *testing.T) {
 	}
 }
 
-func TestStarterConfigOmitsDefaultBranchTemplate(t *testing.T) {
+func TestStarterConfigTemplates(t *testing.T) {
 	cfg := StarterConfig()
-	if data, err := cfg.MarshalYAML(); err != nil {
+	if got := cfg.Templates.Branch; got != "{{ .Prefix }}/{{ .Name }}" {
+		t.Fatalf("unexpected branch template: %q", got)
+	}
+	if got := cfg.Templates.Worktree; got != "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}" {
+		t.Fatalf("unexpected worktree template: %q", got)
+	}
+	data, err := cfg.MarshalYAML()
+	if err != nil {
 		t.Fatalf("MarshalYAML returned error: %v", err)
-	} else if strings.Contains(string(data), "branch_template:") {
-		t.Fatalf("starter config should not include branch_template:\n%s", data)
+	}
+	text := string(data)
+	wantTemplatesBlock := "templates:\n    branch: '{{ .Prefix }}/{{ .Name }}'\n    worktree: ../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}\n"
+	if !strings.Contains(text, wantTemplatesBlock) {
+		t.Fatalf("starter config should serialize expected templates block:\n%s", text)
 	}
 }

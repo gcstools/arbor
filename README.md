@@ -2,7 +2,7 @@
 
 Arbor is a CLI for creating Git worktrees and setting env files, reusable setup commands, and optional app launching.
 
-`README.md` is the end-user guide. For full config reference, source builds, and maintainer/developer docs, see [DOCS.md](/Users/simon/work/github/arbor/DOCS.md).
+`README.md` is the end-user guide. For full config reference, source builds, and maintainer/developer docs, see [DOCS.md](DOCS.md).
 
 ## Install
 
@@ -89,6 +89,10 @@ presets:
     env_selection: [env]
     commands: [bootstrap]
     auto_run: true
+
+templates:
+  branch: "{{ .Prefix }}/{{ .Name }}"
+  worktree: "../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}"
 ```
 
 Use config to answer the choices Arbor would otherwise need to ask interactively:
@@ -97,6 +101,14 @@ Use config to answer the choices Arbor would otherwise need to ask interactively
 - `env_files` declares which files Arbor can copy or symlink into the new worktree.
 - `commands` defines reusable setup steps Arbor can run after creating the worktree.
 - `presets` bundles env files and commands into named workflows such as `fast` or `full`.
+
+Template variables used by Arbor:
+
+- `.Prefix`: normalized branch prefix, empty when none exists.
+- `.Name`: normalized slug after the prefix, or the full slug when no prefix exists.
+- `.Repo`, `.Base`, and `.Branch`: repo name, selected base ref, and resolved branch name.
+
+When `.Prefix` is empty, Arbor removes one adjacent `/` or `-` separator for bare `{{ .Prefix }}` placeholders, so templates can stay branch-free without conditionals.
 
 ## Preview What Arbor Detects
 
@@ -124,7 +136,11 @@ arbor create feature-auth --plan
 arbor create feature-auth
 ```
 
-In interactive mode, Arbor prompts for any unresolved choices, such as which detected env files or commands to use.
+In interactive mode, Arbor prompts only for unresolved choices.
+
+- If `.arbor.yaml` defines `env_files`, Arbor uses those env actions as the plan defaults and does not ask env-action questions during `create`.
+- If `.arbor.yaml` defines `presets.default.commands` and you omit `--preset`, Arbor treats `default` as the selected preset and approves those commands without an extra command prompt.
+- Arbor still prompts for env or command choices when config does not already resolve them.
 
 ### Create a new worktree without prompts
 
@@ -156,14 +172,14 @@ Use `--base` to choose the branch or commit Arbor should branch from when creati
 arbor create feature-auth --preset fast
 ```
 
-Presets preselect env files and commands so common setups stay consistent.
+Presets select env files and commands so common setups stay consistent. When a preset supplies commands, Arbor plans those commands as approved. With an implicit `presets.default`, the same rule applies even when `--preset` is omitted.
 
 ### Override naming and path templates
 
 ```bash
 arbor create feature-auth \
-  --branch-template 'feature/{{ .Name }}' \
-  --path-template '../{{ .Repo }}-{{ .Name }}' \
+  --branch-template '{{ .Prefix }}/{{ .Name }}' \
+  --path-template '../{{ .Repo }}-{{ .Prefix }}-{{ .Name }}' \
   --plan
 ```
 
@@ -194,13 +210,14 @@ If the target path already exists, Arbor reports the conflict and leaves the exi
 Arbor can run setup commands after worktree creation, such as dependency installation or a bootstrap script.
 
 - Commands come from your config and from supported project files that Arbor can detect.
-- Presets can preselect commands.
-- Trusted commands can auto-run when both the preset and config allow it.
-- If trust or config does not resolve the choice, Arbor asks before running the command.
+- Presets can select commands, and selected preset commands are planned as approved.
+- If `presets.default.commands` exists, Arbor uses `default` automatically when `--preset` is omitted.
+- Trusted commands and `auto_run` remain useful as config signals, but command prompting is skipped whenever preset command selection already resolves the choice.
+- If config does not resolve command selection, Arbor asks before running the command.
 
 ### Interactive vs non-interactive runs
 
-- Interactive mode is best when you want Arbor to guide you through unresolved choices.
+- Interactive mode is best when you want Arbor to guide you through unresolved choices only.
 - Non-interactive mode is best for repeatable flows in a fully configured repo.
 - `--plan` is useful in either mode when you want a dry run first.
 

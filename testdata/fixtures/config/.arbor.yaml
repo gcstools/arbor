@@ -3,7 +3,6 @@ defaults:
   env_action: symlink
   command_scope: per_worktree
   trusted_auto_run: true
-  worktree_template: ../{{ .Repo }}-{{ .Name }}
 env_files:
   - id: env
     label: Shared env
@@ -21,3 +20,5 @@ presets:
     env_selection: [env]
     commands: [bootstrap]
     auto_run: true
+templates:
+  worktree: ../{{ .Repo }}-{{ .Name }}

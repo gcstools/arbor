@@ -203,6 +203,23 @@ func TestPersistentFlagInheritedBySubcommandHelp(t *testing.T) {
 	}
 }
 
+func TestCreateHelpExplainsDescriptionArguments(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	if err := Execute([]string{"create", "--help"}, IOStreams{In: bytes.NewBuffer(nil), Out: &out, ErrOut: &errOut}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "Usage:\n  arbor create [description...] [flags]") {
+		t.Fatalf("expected updated usage in help output:\n%s", got)
+	}
+	if !strings.Contains(got, "All arguments after `create` are joined into one worktree description.") {
+		t.Fatalf("expected description guidance in help output:\n%s", got)
+	}
+}
+
 func TestDetectCommandOutput(t *testing.T) {
 	root := initRepo(t)
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("A=1"), 0o644); err != nil {
@@ -249,6 +266,62 @@ func TestCreateCommandPlanningOutput(t *testing.T) {
 	}
 }
 
+func TestCreateCommandPlanningOutputJoinsMultiWordDescription(t *testing.T) {
+	root := initRepo(t)
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	runInDir(t, root, func() {
+		if err := Execute([]string{"create", "feat", "shr-123", "new", "admin", "page", "--non-interactive", "--plan"}, IOStreams{
+			In:     bytes.NewBuffer(nil),
+			Out:    &out,
+			ErrOut: &errOut,
+		}); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	})
+
+	got := out.String()
+	if !strings.Contains(got, "worktree feat-shr-123-new-admin-page") {
+		t.Fatalf("unexpected output: %s", got)
+	}
+	if !strings.Contains(got, "branch: feat/shr-123-new-admin-page") {
+		t.Fatalf("unexpected output: %s", got)
+	}
+}
+
+func TestCreateCommandPlanningOutputSingleQuotedEquivalentArgMatches(t *testing.T) {
+	root := initRepo(t)
+
+	var splitOut bytes.Buffer
+	var splitErr bytes.Buffer
+	runInDir(t, root, func() {
+		if err := Execute([]string{"create", "feat", "shr-123", "new", "admin", "page", "--non-interactive", "--plan"}, IOStreams{
+			In:     bytes.NewBuffer(nil),
+			Out:    &splitOut,
+			ErrOut: &splitErr,
+		}); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	})
+
+	var joinedOut bytes.Buffer
+	var joinedErr bytes.Buffer
+	runInDir(t, root, func() {
+		if err := Execute([]string{"create", "feat shr-123 new admin page", "--non-interactive", "--plan"}, IOStreams{
+			In:     bytes.NewBuffer(nil),
+			Out:    &joinedOut,
+			ErrOut: &joinedErr,
+		}); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	})
+
+	if splitOut.String() != joinedOut.String() {
+		t.Fatalf("expected equivalent planning output\nsplit:\n%s\njoined:\n%s", splitOut.String(), joinedOut.String())
+	}
+}
+
 func TestCreateCommandPlanningOutputWithExistingBranch(t *testing.T) {
 	root := initRepo(t)
 	runGit(t, root, "branch", "feature/auth", "HEAD")
@@ -266,6 +339,50 @@ func TestCreateCommandPlanningOutputWithExistingBranch(t *testing.T) {
 	})
 	if !strings.Contains(out.String(), "branch mode: existing") {
 		t.Fatalf("unexpected output: %s", out.String())
+	}
+}
+
+func TestCreateCommandPlanningOutputUsesConfigDefaultsWithoutInteractiveAnswers(t *testing.T) {
+	root := initRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".arbor.yaml"), []byte(`
+env_files:
+  - id: env
+    label: Primary env
+    source_path: .env
+    target_path: .env
+    default_action: copy
+commands:
+  - id: install
+    label: Install deps
+    command: pnpm install
+presets:
+  default:
+    commands: [install]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("A=1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	runInDir(t, root, func() {
+		if err := Execute([]string{"create", "feature-auth", "--plan"}, IOStreams{
+			In:     bytes.NewBufferString(""),
+			Out:    &out,
+			ErrOut: &errOut,
+		}); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	})
+
+	got := out.String()
+	if !strings.Contains(got, "env actions: .env=copy") {
+		t.Fatalf("expected config-driven env action in output: %s", got)
+	}
+	if !strings.Contains(got, "commands: Install deps=run") {
+		t.Fatalf("expected config-driven command approval in output: %s", got)
 	}
 }
 
@@ -289,6 +406,9 @@ func TestCreateCommandExecutes(t *testing.T) {
 	if !strings.Contains(out.String(), "created: true") {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
+	if !strings.Contains(out.String(), "branch: feature-live") {
+		t.Fatalf("unexpected output: %s", out.String())
+	}
 }
 
 func TestCreateCommandExecutesWithExistingBranch(t *testing.T) {
@@ -309,26 +429,30 @@ func TestCreateCommandExecutesWithExistingBranch(t *testing.T) {
 	if !strings.Contains(out.String(), "created: true") {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
+	if !strings.Contains(out.String(), "branch: feature/auth") {
+		t.Fatalf("unexpected output: %s", out.String())
+	}
 	if !strings.Contains(out.String(), "worktree feature/auth") {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 }
 
-func TestCreateCommandRejectsMultipleNames(t *testing.T) {
+func TestCreateCommandTreatsMultiplePositionalsAsOneDescription(t *testing.T) {
 	root := initRepo(t)
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	var runErr error
 	runInDir(t, root, func() {
-		runErr = Execute([]string{"create", "a", "b", "--non-interactive"}, IOStreams{
+		if err := Execute([]string{"create", "a", "b", "--non-interactive", "--plan"}, IOStreams{
 			In:     bytes.NewBuffer(nil),
 			Out:    &out,
 			ErrOut: &errOut,
-		})
+		}); err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
 	})
-	if runErr == nil || !strings.Contains(runErr.Error(), "can only create one worktree at a time") {
-		t.Fatalf("expected single-worktree error, got %v", runErr)
+	if !strings.Contains(out.String(), "worktree a-b") {
+		t.Fatalf("unexpected output: %s", out.String())
 	}
 }
 

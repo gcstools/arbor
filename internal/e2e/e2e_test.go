@@ -77,17 +77,71 @@ func TestSingleCreateEndToEnd(t *testing.T) {
 	}
 }
 
-func TestCreateRejectsMultipleNamesEndToEnd(t *testing.T) {
+func TestImplicitDefaultPresetCommandsExecuteEndToEnd(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".arbor.yaml"), []byte(`
+commands:
+  - id: bootstrap
+    label: Bootstrap
+    command: printf done > ran.txt
+
+presets:
+  default:
+    commands: [bootstrap]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, root)
+
+	plan, err := planner.BuildCreatePlan(context.Background(), planner.Inputs{
+		CWD:   root,
+		Names: []string{"feature-auth"},
+	}, bytes.NewBufferString(""), ".arbor.yaml")
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Preset; got != "default" {
+		t.Fatalf("expected implicit default preset, got %q", got)
+	}
+	if len(plan.Worktrees[0].Commands) != 1 || !plan.Worktrees[0].Commands[0].Approved {
+		t.Fatalf("expected approved default command, got %#v", plan.Worktrees[0].Commands)
+	}
+
+	summary, err := execute.Runner{}.Apply(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+	if summary.HasFailure {
+		t.Fatalf("unexpected failure: %#v", summary)
+	}
+	if len(summary.Worktrees[0].CommandResult) != 1 || !summary.Worktrees[0].CommandResult[0].Executed {
+		t.Fatalf("expected executed command result, got %#v", summary.Worktrees[0].CommandResult)
+	}
+	if _, err := os.Stat(filepath.Join(summary.Worktrees[0].Path, "ran.txt")); err != nil {
+		t.Fatalf("expected command side effect in worktree: %v", err)
+	}
+}
+
+func TestCreateJoinsMultipleNamesEndToEnd(t *testing.T) {
 	root := copyFixtureRepo(t, "config")
 	initGitRepo(t, root)
 
-	_, err := planner.BuildCreatePlan(context.Background(), planner.Inputs{
+	plan, err := planner.BuildCreatePlan(context.Background(), planner.Inputs{
 		CWD:            root,
-		Names:          []string{"api", "web"},
+		Names:          []string{"feat", "api", "web"},
 		NonInteractive: true,
 	}, bytes.NewBuffer(nil), ".arbor.yaml")
-	if err == nil || err.Error() != "exactly one worktree name is supported" {
-		t.Fatalf("expected single-worktree error, got %v", err)
+	if err != nil {
+		t.Fatalf("BuildCreatePlan returned error: %v", err)
+	}
+	if got := plan.Worktrees[0].Name; got != "feat-api-web" {
+		t.Fatalf("unexpected worktree name: %q", got)
+	}
+	if got := plan.Worktrees[0].Branch; got != "feat/api-web" {
+		t.Fatalf("unexpected branch: %q", got)
 	}
 }
 

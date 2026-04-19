@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"unicode"
 
 	"arbor/internal/config"
 	"arbor/internal/detect"
@@ -37,6 +39,12 @@ type CreatePlan struct {
 	Warnings  []string
 }
 
+type nameResolution struct {
+	Prefix string
+	Name   string
+	Branch string
+}
+
 func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath string) (CreatePlan, error) {
 	if in == nil {
 		in = os.Stdin
@@ -58,33 +66,40 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 		return CreatePlan{}, err
 	}
 
-	names, presetName, promptBranchTemplate, promptPathTemplate, err := resolveNamesAndPreset(input, cfg, in, reader)
+	resolvedName, presetName, promptBranchTemplate, promptPathTemplate, err := resolveNamesAndPreset(input, cfg, in, reader)
 	if err != nil {
 		return CreatePlan{}, err
 	}
 	if err := validateBranchInputs(input); err != nil {
 		return CreatePlan{}, err
 	}
+	effectivePresetName := resolveEffectivePresetName(presetName, cfg)
+
 	baseRef := firstNonEmpty(input.BaseRef, cfg.Defaults.BaseRef, repoState.CurrentRef, repoState.CurrentCommit)
 	openApp := firstNonEmpty(input.OpenApp, cfg.Defaults.OpenApp)
 	branchTemplate := firstNonEmpty(input.BranchTemplate, promptBranchTemplate, cfg.Templates.Branch)
-	pathTemplate := firstNonEmpty(input.PathTemplate, promptPathTemplate, cfg.Defaults.WorktreeTemplate, cfg.Templates.Worktree)
-
-	if branchTemplate == "" {
-		branchTemplate = "{{ .Name }}"
-	}
+	pathTemplate := firstNonEmpty(input.PathTemplate, promptPathTemplate, cfg.Templates.Worktree)
 	if pathTemplate == "" {
 		pathTemplate = filepath.Join("..", "{{ .Repo }}-{{ .Name }}")
 	}
 
 	repoName := filepath.Base(repoState.Root)
-	name := names[0]
+	displayName := joinPrefixName(resolvedName.Prefix, resolvedName.Name)
+	templateName := resolvedName.Name
 	branchMode := model.BranchModeCreate
 	branch := strings.TrimSpace(input.Branch)
+	pathPrefix := resolvedName.Prefix
+	pathName := templateName
 	if branch != "" {
 		branchMode = model.BranchModeExisting
-		if name == "" {
-			name = branch
+		if len(trimNonEmpty(input.Names)) == 0 {
+			displayName = sanitizePathPrefix(branch)
+			if displayName == "" {
+				displayName = branch
+			}
+		} else {
+			pathName = displayName
+			pathPrefix = ""
 		}
 		if !branchExists(repoState, branch) {
 			return CreatePlan{}, fmt.Errorf("branch does not exist %q", branch)
@@ -93,25 +108,31 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 			return CreatePlan{}, fmt.Errorf("branch already has a worktree %q at %q", branch, existingPath)
 		}
 	} else {
-		branch, err = config.RenderTemplate(branchTemplate, config.TemplateData{
-			Name:  name,
-			Index: 1,
-			Base:  baseRef,
-			Repo:  repoName,
-		})
-		if err != nil {
-			return CreatePlan{}, fmt.Errorf("branch template for %q: %w", name, err)
+		branch = resolvedName.Branch
+		if branchTemplate != "" {
+			branch, err = config.RenderTemplate(branchTemplate, config.TemplateData{
+				Prefix: resolvedName.Prefix,
+				Name:   templateName,
+				Index:  1,
+				Base:   baseRef,
+				Repo:   repoName,
+				Branch: branch,
+			})
+			if err != nil {
+				return CreatePlan{}, fmt.Errorf("branch template for %q: %w", displayName, err)
+			}
 		}
 	}
 	pathValue, err := config.RenderTemplate(pathTemplate, config.TemplateData{
-		Name:   name,
+		Prefix: pathPrefix,
+		Name:   pathName,
 		Index:  1,
 		Base:   baseRef,
 		Repo:   repoName,
 		Branch: branch,
 	})
 	if err != nil {
-		return CreatePlan{}, fmt.Errorf("path template for %q: %w", name, err)
+		return CreatePlan{}, fmt.Errorf("path template for %q: %w", displayName, err)
 	}
 	path := config.CleanWorktreePath(filepath.Join(repoState.Root, pathValue))
 	if _, err := os.Stat(path); err == nil {
@@ -125,18 +146,18 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 		}
 	}
 	worktree := model.WorktreePlan{
-		Name:       name,
+		Name:       displayName,
 		Branch:     branch,
 		BranchMode: branchMode,
 		BaseRef:    baseRef,
 		Path:       path,
-		Preset:     presetName,
-		EnvActions: buildDefaultEnvPlans(result.EnvFiles, cfg, presetName),
-		Commands:   buildDefaultCommandPlans(result.Commands, cfg, presetName),
+		Preset:     effectivePresetName,
+		EnvActions: buildDefaultEnvPlans(result.EnvFiles, cfg, effectivePresetName),
+		Commands:   buildDefaultCommandPlans(result.Commands, cfg, effectivePresetName),
 	}
 
 	if !input.NonInteractive {
-		if err := promptForSelections(reader, &worktree, cfg, presetName); err != nil {
+		if err := promptForSelections(reader, &worktree, cfg, effectivePresetName); err != nil {
 			return CreatePlan{}, err
 		}
 	}
@@ -152,12 +173,13 @@ func BuildCreatePlan(ctx context.Context, input Inputs, in io.Reader, cfgPath st
 func RenderSummary(plan CreatePlan) string {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("repo: %s", plan.RepoState.Root))
-	lines = append(lines, fmt.Sprintf("base ref: %s", firstNonEmpty(plan.RepoState.CurrentRef, plan.RepoState.CurrentCommit)))
+	lines = append(lines, fmt.Sprintf("base ref: %s", summarizeBaseRef(plan)))
 	lines = append(lines, fmt.Sprintf("open app: %s", firstNonEmpty(plan.OpenApp, "disabled")))
 	for _, worktree := range plan.Worktrees {
 		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("worktree %s", worktree.Name))
 		lines = append(lines, fmt.Sprintf("  branch: %s", worktree.Branch))
+		lines = append(lines, fmt.Sprintf("  preset: %s", worktree.Preset))
 		lines = append(lines, fmt.Sprintf("  branch mode: %s", worktree.BranchMode))
 		lines = append(lines, fmt.Sprintf("  path: %s", worktree.Path))
 		lines = append(lines, fmt.Sprintf("  env actions: %s", summarizeEnvActions(worktree.EnvActions)))
@@ -175,49 +197,84 @@ func RenderSummary(plan CreatePlan) string {
 	return strings.Join(lines, "\n")
 }
 
-func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader *bufio.Reader) ([]string, string, string, string, error) {
-	names := dedupeNonEmpty(input.Names)
-	promptBranchTemplate := ""
-	promptPathTemplate := ""
-	if len(names) > 1 {
-		return nil, "", "", "", fmt.Errorf("exactly one worktree name is supported")
+func summarizeBaseRef(plan CreatePlan) string {
+	if len(plan.Worktrees) == 0 {
+		return firstNonEmpty(plan.RepoState.CurrentRef, plan.RepoState.CurrentCommit)
 	}
-	if len(names) == 0 {
-		if input.Branch != "" {
-			names = []string{strings.TrimSpace(input.Branch)}
+
+	baseRef := strings.TrimSpace(plan.Worktrees[0].BaseRef)
+	if baseRef == "" {
+		return firstNonEmpty(plan.RepoState.CurrentRef, plan.RepoState.CurrentCommit)
+	}
+
+	for _, worktree := range plan.Worktrees[1:] {
+		if strings.TrimSpace(worktree.BaseRef) != baseRef {
+			return "multiple"
 		}
 	}
-	if len(names) == 0 {
+
+	return baseRef
+}
+
+func resolveNamesAndPreset(input Inputs, cfg *config.File, in io.Reader, reader *bufio.Reader) (nameResolution, string, string, string, error) {
+	parts := trimNonEmpty(input.Names)
+	if len(parts) == 0 {
+		if input.Branch != "" {
+			parts = []string{strings.TrimSpace(input.Branch)}
+		}
+	}
+	if len(parts) == 0 {
 		if input.NonInteractive {
-			return nil, "", "", "", fmt.Errorf("worktree name is required in non-interactive mode")
+			return nameResolution{}, "", "", "", fmt.Errorf("worktree name is required in non-interactive mode")
 		}
 		name, err := promptValue(reader, "worktree name")
 		if err != nil {
-			return nil, "", "", "", err
+			return nameResolution{}, "", "", "", err
 		}
 		if name == "" {
-			return nil, "", "", "", fmt.Errorf("worktree name is required")
+			return nameResolution{}, "", "", "", fmt.Errorf("worktree name is required")
 		}
-		if input.BranchTemplate == "" {
-			prefix, err := promptBranchPrefix(in, reader)
+		if strings.TrimSpace(input.BranchTemplate) != "" {
+			normalizedName, err := normalizeCreateName(name)
 			if err != nil {
-				return nil, "", "", "", err
+				return nameResolution{}, "", "", "", err
 			}
-			if prefix != "" {
-				promptBranchTemplate = prefix + "/{{ .Name }}"
-				promptPathTemplate = filepath.Join("..", "{{ .Repo }}-"+sanitizePathPrefix(prefix)+"-{{ .Name }}")
+			if input.Preset != "" && cfg != nil {
+				if _, err := cfg.ResolvePreset(input.Preset); err != nil {
+					return nameResolution{}, "", "", "", err
+				}
+			}
+			return normalizedName, input.Preset, "", "", nil
+		}
+		prefix, err := promptBranchPrefix(in, reader)
+		if err != nil {
+			return nameResolution{}, "", "", "", err
+		}
+		resolved, err := normalizeInteractiveCreateName(name, prefix)
+		if err != nil {
+			return nameResolution{}, "", "", "", err
+		}
+		if input.Preset != "" && cfg != nil {
+			if _, err := cfg.ResolvePreset(input.Preset); err != nil {
+				return nameResolution{}, "", "", "", err
 			}
 		}
-		names = []string{name}
+		return resolved, input.Preset, "", "", nil
+	}
+
+	rawName := strings.Join(parts, " ")
+	resolution, err := normalizeCreateName(rawName)
+	if err != nil {
+		return nameResolution{}, "", "", "", err
 	}
 
 	if input.Preset != "" && cfg != nil {
 		if _, err := cfg.ResolvePreset(input.Preset); err != nil {
-			return nil, "", "", "", err
+			return nameResolution{}, "", "", "", err
 		}
 	}
 
-	return names, input.Preset, promptBranchTemplate, promptPathTemplate, nil
+	return resolution, input.Preset, "", "", nil
 }
 
 func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
@@ -228,12 +285,13 @@ func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
 	for {
 		fmt.Println("branch prefix:")
 		fmt.Println("  1) feat")
-		fmt.Println("  2) fix")
-		fmt.Println("  3) chore")
-		fmt.Println("  4) custom")
-		fmt.Println("  5) empty")
+		fmt.Println("  2) feature")
+		fmt.Println("  3) fix")
+		fmt.Println("  4) chore")
+		fmt.Println("  5) custom")
+		fmt.Println("  6) empty")
 
-		choice, err := promptValue(reader, "select prefix [1-5]")
+		choice, err := promptValue(reader, "select prefix [1-6]")
 		if err != nil {
 			return "", err
 		}
@@ -241,17 +299,25 @@ func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
 		switch strings.ToLower(strings.TrimSpace(choice)) {
 		case "1", "feat":
 			return "feat", nil
-		case "2", "fix":
+		case "2", "feature":
+			return "feature", nil
+		case "3", "fix":
 			return "fix", nil
-		case "3", "chore":
+		case "4", "chore":
 			return "chore", nil
-		case "4", "custom":
-			value, err := promptValue(reader, "custom prefix")
-			if err != nil {
-				return "", err
+		case "5", "custom":
+			for {
+				value, err := promptValue(reader, "custom prefix")
+				if err != nil {
+					return "", err
+				}
+				value = sanitizePathPrefix(value)
+				if value != "" {
+					return value, nil
+				}
+				fmt.Println("custom prefix must contain at least one letter or number")
 			}
-			return strings.Trim(value, "/ "), nil
-		case "5", "empty", "":
+		case "6", "empty", "":
 			return "", nil
 		default:
 			fmt.Println("invalid prefix choice")
@@ -260,7 +326,7 @@ func promptBranchPrefix(in io.Reader, reader *bufio.Reader) (string, error) {
 }
 
 func promptBranchPrefixSelect(in io.Reader) (string, error) {
-	options := []string{"feat", "fix", "chore", "custom", "empty"}
+	options := []string{"feat", "feature", "fix", "chore", "custom", "empty"}
 	selectPrompt := promptui.Select{
 		Label:     "Branch prefix",
 		Items:     options,
@@ -275,14 +341,14 @@ func promptBranchPrefixSelect(in io.Reader) (string, error) {
 	}
 
 	switch choice {
-	case "feat", "fix", "chore":
+	case "feat", "feature", "fix", "chore":
 		return choice, nil
 	case "custom":
 		prompt := promptui.Prompt{
 			Label: "custom prefix",
 			Stdin: io.NopCloser(in),
 			Validate: func(value string) error {
-				if strings.Trim(value, "/ ") == "" {
+				if sanitizePathPrefix(value) == "" {
 					return fmt.Errorf("enter a prefix or choose empty")
 				}
 				return nil
@@ -292,7 +358,7 @@ func promptBranchPrefixSelect(in io.Reader) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return strings.Trim(value, "/ "), nil
+		return sanitizePathPrefix(value), nil
 	default:
 		return "", nil
 	}
@@ -317,9 +383,83 @@ func supportsInteractiveSelect(in io.Reader) bool {
 
 func sanitizePathPrefix(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "-", "_", "-", ".", "-")
-	value = replacer.Replace(value)
-	return strings.Trim(value, "-")
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			b.WriteRune(r)
+			lastDash = false
+		case strings.ContainsRune("+#&", r):
+			b.WriteRune(r)
+			lastDash = false
+		case unicode.IsSpace(r), strings.ContainsRune("/._-", r):
+			if b.Len() > 0 && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		default:
+			continue
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func joinPrefixName(prefix, name string) string {
+	if prefix == "" {
+		return name
+	}
+	return prefix + "-" + name
+}
+
+func normalizeCreateName(raw string) (nameResolution, error) {
+	tokens := strings.Fields(strings.TrimSpace(raw))
+	if len(tokens) == 0 {
+		return nameResolution{}, fmt.Errorf("worktree name is required")
+	}
+
+	name := sanitizePathPrefix(strings.Join(tokens, " "))
+	if name == "" {
+		return nameResolution{}, fmt.Errorf("worktree name is required")
+	}
+	if len(tokens) > 1 {
+		prefix := strings.ToLower(tokens[0])
+		switch prefix {
+		case "feat", "feature", "fix", "chore":
+			remainder := sanitizePathPrefix(strings.Join(tokens[1:], " "))
+			if remainder != "" {
+				return nameResolution{
+					Prefix: prefix,
+					Name:   remainder,
+					Branch: prefix + "/" + remainder,
+				}, nil
+			}
+		}
+	}
+
+	return nameResolution{Name: name, Branch: name}, nil
+}
+
+func normalizeInteractiveCreateName(rawName, prefix string) (nameResolution, error) {
+	prefix = sanitizePathPrefix(prefix)
+	switch prefix {
+	case "":
+		resolution, err := normalizeCreateName(rawName)
+		if err != nil {
+			return nameResolution{}, err
+		}
+		return resolution, nil
+	}
+
+	name := sanitizePathPrefix(rawName)
+	if name == "" {
+		return nameResolution{}, fmt.Errorf("worktree name is required")
+	}
+	return nameResolution{
+		Prefix: prefix,
+		Name:   name,
+		Branch: prefix + "/" + name,
+	}, nil
 }
 
 func buildDefaultEnvPlans(candidates []model.EnvCandidate, cfg *config.File, presetName string) []model.EnvPlan {
@@ -350,71 +490,74 @@ func buildDefaultEnvPlans(candidates []model.EnvCandidate, cfg *config.File, pre
 
 func buildDefaultCommandPlans(candidates []model.CommandCandidate, cfg *config.File, presetName string) []model.CommandExecution {
 	selected := map[string]struct{}{}
-	autoRun := false
 	if cfg != nil && presetName != "" {
 		if preset, ok := cfg.Presets[presetName]; ok {
 			for _, id := range preset.Commands {
 				selected[id] = struct{}{}
 			}
 		}
-		autoRun = cfg.ResolveTrustedAutoRun(presetName)
 	}
 
 	plans := make([]model.CommandExecution, 0, len(candidates))
 	for _, candidate := range candidates {
 		_, isSelected := selected[candidate.ID]
-		approved := autoRun && isSelected && candidate.Trusted
 		plans = append(plans, model.CommandExecution{
 			Candidate: candidate,
-			Approved:  approved,
+			Approved:  isSelected,
 		})
 	}
 	return plans
 }
 
 func promptForSelections(reader *bufio.Reader, worktree *model.WorktreePlan, cfg *config.File, presetName string) error {
+	promptEnv := shouldPromptEnvSelections(cfg)
+	promptCommands := shouldPromptCommandSelections(cfg, presetName)
 	lastEnvAction := model.Action("")
-	for i := range worktree.EnvActions {
-		defaultAction := worktree.EnvActions[i].Action
-		if lastEnvAction != "" {
-			defaultAction = lastEnvAction
-			worktree.EnvActions[i].Action = defaultAction
+	if promptEnv {
+		for i := range worktree.EnvActions {
+			defaultAction := worktree.EnvActions[i].Action
+			if lastEnvAction != "" {
+				defaultAction = lastEnvAction
+				worktree.EnvActions[i].Action = defaultAction
+			}
+			prompt := formatEnvPrompt(worktree.Name, worktree.EnvActions[i].Candidate.TargetPath, defaultAction)
+			value, err := promptValue(reader, prompt)
+			if err != nil {
+				return err
+			}
+			if value == "" {
+				continue
+			}
+			action, err := parseAction(value)
+			if err != nil {
+				return err
+			}
+			worktree.EnvActions[i].Action = action
+			lastEnvAction = action
 		}
-		prompt := formatEnvPrompt(worktree.Name, worktree.EnvActions[i].Candidate.TargetPath, defaultAction)
-		value, err := promptValue(reader, prompt)
-		if err != nil {
-			return err
-		}
-		if value == "" {
-			continue
-		}
-		action, err := parseAction(value)
-		if err != nil {
-			return err
-		}
-		worktree.EnvActions[i].Action = action
-		lastEnvAction = action
 	}
 
 	autoRun := cfg != nil && cfg.ResolveTrustedAutoRun(presetName)
-	for i := range worktree.Commands {
-		if autoRun && worktree.Commands[i].Candidate.Trusted {
-			worktree.Commands[i].Approved = true
-			continue
+	if promptCommands {
+		for i := range worktree.Commands {
+			if autoRun && worktree.Commands[i].Candidate.Trusted {
+				worktree.Commands[i].Approved = true
+				continue
+			}
+			defaultAnswer := "n"
+			if worktree.Commands[i].Approved {
+				defaultAnswer = "y"
+			}
+			value, err := promptValue(reader, formatCommandPrompt(worktree.Name, worktree.Commands[i].Candidate.Label, defaultAnswer))
+			if err != nil {
+				return err
+			}
+			if value == "" {
+				worktree.Commands[i].Approved = defaultAnswer == "y"
+				continue
+			}
+			worktree.Commands[i].Approved = parseYesNo(value)
 		}
-		defaultAnswer := "n"
-		if worktree.Commands[i].Approved {
-			defaultAnswer = "y"
-		}
-		value, err := promptValue(reader, formatCommandPrompt(worktree.Name, worktree.Commands[i].Candidate.Label, defaultAnswer))
-		if err != nil {
-			return err
-		}
-		if value == "" {
-			worktree.Commands[i].Approved = defaultAnswer == "y"
-			continue
-		}
-		worktree.Commands[i].Approved = parseYesNo(value)
 	}
 	return nil
 }
@@ -511,6 +654,18 @@ func dedupeNonEmpty(values []string) []string {
 	return out
 }
 
+func trimNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -534,12 +689,7 @@ func validateBranchInputs(input Inputs) error {
 }
 
 func branchExists(repoState gitutil.RepoState, branch string) bool {
-	for _, existing := range repoState.LocalBranches {
-		if existing == branch {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(repoState.LocalBranches, branch)
 }
 
 func branchInUse(repoState gitutil.RepoState, branch string) (string, bool) {
@@ -549,4 +699,32 @@ func branchInUse(repoState gitutil.RepoState, branch string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func resolveEffectivePresetName(inputPreset string, cfg *config.File) string {
+	if inputPreset != "" {
+		return inputPreset
+	}
+	if cfg != nil {
+		if _, ok := cfg.Presets["default"]; ok {
+			return "default"
+		}
+	}
+	return ""
+}
+
+func shouldPromptEnvSelections(cfg *config.File) bool {
+	if cfg != nil && len(cfg.EnvFiles) > 0 {
+		return false
+	}
+	return true
+}
+
+func shouldPromptCommandSelections(cfg *config.File, presetName string) bool {
+	if cfg != nil && presetName != "" {
+		if preset, ok := cfg.Presets[presetName]; ok && len(preset.Commands) > 0 {
+			return false
+		}
+	}
+	return true
 }
